@@ -193,4 +193,36 @@ describe("formatQuotaStatsReport (markdown)", () => {
     expect(out).toContain("| Current");
     expect(out).toContain("| Session");
   });
+
+  it("shows provider candidates for ambiguous unknown pricing rows", () => {
+    const r = makeEmptyResult({
+      totals: {
+        priced: { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 },
+        unknown: { input: 10, output: 20, reasoning: 0, cache_read: 0, cache_write: 0 },
+        unpriced: { input: 0, output: 0, reasoning: 0, cache_read: 0, cache_write: 0 },
+        costUsd: 0,
+        messageCount: 1,
+        sessionCount: 1,
+      },
+      unknown: [
+        {
+          key: {
+            sourceProviderID: "opencode",
+            sourceModelID: "foo-model",
+            mappedModel: "foo-model",
+            providerCandidates: ["openai", "anthropic"],
+          },
+          tokens: { input: 10, output: 20, reasoning: 0, cache_read: 0, cache_write: 0 },
+          messageCount: 1,
+        },
+      ],
+    });
+
+    const out = formatQuotaStatsReport({
+      title: "Tokens used (Last 24 Hours) (/tokens_daily)",
+      result: r,
+    });
+
+    expect(out).toContain("candidates: openai,anthropic");
+  });
 });

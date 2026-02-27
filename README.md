@@ -1,10 +1,10 @@
 # Opencode Quota
 
-Track OpenCode quota & tokens via Toasts/Commands with zero context window pollution. 
+Track OpenCode quota & tokens via Toasts/Commands with zero context window pollution.
 
-**Quota provider supports**: GitHub Copilot, OpenAl (Plus/Pro), Qwen Code, Chutes Al, Firmware Al, Google Antigravity, and Z.ai coding plan. 
+**Quota provider supports**: GitHub Copilot, OpenAI (Plus/Pro), Qwen Code, Chutes AI, Firmware AI, Google Antigravity, and Z.ai coding plan.
 
-**Token provider supports**: All models and providers in [models.dev](https://models.dev)
+**Token provider supports**: All models and providers in [models.dev](https://models.dev).
 
 ## What It Does
 
@@ -12,7 +12,7 @@ Track OpenCode quota & tokens via Toasts/Commands with zero context window pollu
 
 ![Image of quota toasts](https://github.com/slkiser/opencode-quota/blob/main/toast.png)
 
-**Token Report Commands** - Track token usage and estimated costs across sessions.
+**Token Report Commands** - Track token usage and estimated costs across sessions using only local OpenCode SQLite history plus the bundled models.dev snapshot (no network calls).
 
 ![Image of /quota and /tokens_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
 
@@ -63,7 +63,9 @@ That's it. Providers are auto-detected based on your OpenCode configuration. Toa
 | `/tokens_session` | Tokens used in current session                                  |
 | `/tokens_between` | Tokens between two dates (YYYY-MM-DD)                           |
 
-## Supported Providers
+Token reporting commands are the `/tokens_*` family (there is no `/token` command).
+
+## Supported Quota Providers
 
 | Provider           | Config ID            | Auth Source                                   |
 | ------------------ | -------------------- | --------------------------------------------- |
@@ -74,6 +76,8 @@ That's it. Providers are auto-detected based on your OpenCode configuration. Toa
 | Chutes AI          | `chutes`             | OpenCode auth or API key                      |
 | Google Antigravity | `google-antigravity` | Multi-account via `opencode-antigravity-auth` |
 | Z.ai               | `zai`                | OpenCode auth (automatic)                     |
+
+Token pricing coverage is broader than quota provider support: `/tokens_*` maps usage against all provider/model entries present in the bundled models.dev data snapshot.
 
 ### Provider-Specific Setup
 

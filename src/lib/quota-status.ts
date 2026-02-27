@@ -484,12 +484,16 @@ export async function buildQuotaStatusReport(params: {
     );
     for (const row of agg.unknown.slice(0, 25)) {
       const src = `${row.key.sourceProviderID}/${row.key.sourceModelID}`;
-      const mapped =
+      const mappedBase =
         row.key.mappedProvider && row.key.mappedModel
           ? `${row.key.mappedProvider}/${row.key.mappedModel}`
           : "(none)";
+      const candidates =
+        row.key.providerCandidates && row.key.providerCandidates.length > 0
+          ? ` candidates=${row.key.providerCandidates.join(",")}`
+          : "";
       lines.push(
-        `- ${src} mapped=${mapped} tokens=${fmtInt(tokensTotal(row.tokens))} msgs=${fmtInt(row.messageCount)}`,
+        `- ${src} mapped=${mappedBase}${candidates} tokens=${fmtInt(tokensTotal(row.tokens))} msgs=${fmtInt(row.messageCount)}`,
       );
     }
     if (agg.unknown.length > 25) {

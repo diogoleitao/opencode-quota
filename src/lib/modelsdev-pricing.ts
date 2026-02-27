@@ -55,6 +55,10 @@ export function hasProvider(providerId: string): boolean {
   return !!ensureLoaded().providers[providerId];
 }
 
+export function isModelsDevProviderId(providerId: string): boolean {
+  return hasProvider(providerId);
+}
+
 export function hasModel(providerId: string, modelId: string): boolean {
   const p = ensureLoaded().providers[providerId];
   if (!p) return false;
@@ -66,7 +70,7 @@ export function hasModel(providerId: string, modelId: string): boolean {
  * Returns null when model is not found or is ambiguous across providers.
  */
 export function inferProviderForModelId(modelId: string): string | null {
-  const providers = ensureModelIndex().get(modelId);
+  const providers = listProvidersForModelId(modelId);
   if (!providers || providers.length !== 1) return null;
   return providers[0] ?? null;
 }
@@ -79,10 +83,23 @@ export function listProviders(): string[] {
   return Object.keys(ensureLoaded().providers);
 }
 
+export function listModelsForProvider(providerId: string): string[] {
+  return Object.keys(ensureLoaded().providers[providerId] ?? {});
+}
+
+export function listProvidersForModelId(modelId: string): string[] {
+  const providers = ensureModelIndex().get(modelId) ?? [];
+  return [...providers].sort((a, b) => a.localeCompare(b));
+}
+
 export function lookupCost(providerId: string, modelId: string): CostBuckets | null {
   const p = ensureLoaded().providers[providerId];
   if (!p) return null;
   const c = p[modelId];
   if (!c) return null;
   return c;
+}
+
+export function hasCost(providerId: string, modelId: string): boolean {
+  return lookupCost(providerId, modelId) != null;
 }

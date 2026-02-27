@@ -325,10 +325,20 @@ export function formatQuotaStatsReport(params: {
         aligns: ["left", "left", "left", "right", "right"],
         widthMode: TABLE_WIDTH_MODE,
         rows: r.unknown.slice(0, 20).map((u) => {
-          const mapped =
+          const mappedBase =
             u.key.mappedProvider && u.key.mappedModel
               ? `${u.key.mappedProvider}/${u.key.mappedModel}`
               : "-";
+          const candidateSuffix =
+            u.key.providerCandidates && u.key.providerCandidates.length > 0
+              ? `candidates: ${u.key.providerCandidates.join(",")}`
+              : "";
+          const mapped =
+            candidateSuffix.length > 0
+              ? mappedBase === "-"
+                ? candidateSuffix
+                : `${mappedBase} (${candidateSuffix})`
+              : mappedBase;
           return [
             normalizeSourceName(u.key.sourceProviderID),
             u.key.sourceModelID,

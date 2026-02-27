@@ -7,8 +7,9 @@ import {
 } from "./opencode-storage.js";
 import {
   hasProvider,
-  inferProviderForModelId,
-  listProviders,
+  hasModel,
+  isModelsDevProviderId,
+  listProvidersForModelId,
   lookupCost,
 } from "./modelsdev-pricing.js";
 
@@ -33,7 +34,14 @@ export type UnknownKey = {
   sourceModelID: string;
   mappedProvider?: string;
   mappedModel?: string;
+  normalizedModelID?: string;
+  providerCandidates?: string[];
+  reason?: "missing_model" | "missing_provider" | "ambiguous_model";
 };
+
+export type PricingResolution =
+  | { ok: true; key: PricedKey; method: "source_provider" | "model_prefix" | "unique_model" | "alias_fallback" }
+  | { ok: false; unknown: UnknownKey };
 
 export type AggregateRow = {
   key: PricedKey;
@@ -132,14 +140,8 @@ function messageBuckets(msg: OpenCodeMessage): TokenBuckets {
 function normalizeModelId(raw: string): string {
   let s = raw.trim();
 
-  // Strip provider prefixes like "github-copilot/claude-opus-4.6" or "anthropic/claude-opus-4.6"
-  const lastSlash = s.lastIndexOf("/");
-  if (lastSlash !== -1) s = s.slice(lastSlash + 1);
-
   // routing prefixes
   if (s.toLowerCase().startsWith("antigravity-")) s = s.slice("antigravity-".length);
-  // common subscription variants
-  if (s.toLowerCase().endsWith("-thinking")) s = s.slice(0, -"-thinking".length);
   // claude dotted versions -> hyphenated (models.dev uses dash): 4.5 -> 4-5, 4.6 -> 4-6, etc.
   s = s.replace(/(claude-[a-z-]+)-(\d+)\.(\d+)(?=$|[^0-9])/gi, "$1-$2-$3");
   // special: "glm-4.7-free" -> "glm-4.7"
@@ -149,11 +151,49 @@ function normalizeModelId(raw: string): string {
   return s;
 }
 
+function parseModelIdHint(rawModelId?: string): { providerHint?: string; modelPart?: string } {
+  if (!rawModelId || typeof rawModelId !== "string") return {};
+  const trimmed = rawModelId.trim();
+  if (!trimmed) return {};
+  const lastSlash = trimmed.lastIndexOf("/");
+  if (lastSlash === -1) return { modelPart: trimmed };
+  if (lastSlash === trimmed.length - 1) return { providerHint: trimmed.slice(0, -1) };
+  return { providerHint: trimmed.slice(0, lastSlash), modelPart: trimmed.slice(lastSlash + 1) };
+}
+
+const SOURCE_PROVIDER_ALIASES: Record<string, string> = {
+  "github-copilot": "openai",
+  "copilot-chat": "openai",
+  chatgpt: "openai",
+  codex: "openai",
+  "zai-coding-plan": "zai",
+  glm: "zai",
+};
+
+function normalizeSourceProviderId(raw?: string): string | undefined {
+  if (!raw || typeof raw !== "string") return undefined;
+  const lowered = raw.trim().toLowerCase();
+  if (!lowered || lowered === "unknown") return undefined;
+
+  const parts = lowered.split(/[/:]/g).filter(Boolean);
+  const candidates = [lowered, ...parts].filter((v, i, arr) => arr.indexOf(v) === i);
+
+  for (let i = candidates.length - 1; i >= 0; i--) {
+    const candidate = candidates[i]!;
+    if (isModelsDevProviderId(candidate)) return candidate;
+    const alias = SOURCE_PROVIDER_ALIASES[candidate];
+    if (alias && isModelsDevProviderId(alias)) return alias;
+  }
+
+  const directAlias = SOURCE_PROVIDER_ALIASES[lowered];
+  return directAlias ?? lowered;
+}
+
 function inferOfficialProviderFromModelId(modelId: string): string | null {
   // Prefer snapshot-driven inference when possible.
   // This keeps mapping future-proof as models.dev adds providers/models.
-  const snapProvider = inferProviderForModelId(modelId);
-  if (snapProvider) return snapProvider;
+  const providers = listProvidersForModelId(modelId);
+  if (providers.length === 1) return providers[0] ?? null;
 
   const lower = modelId.toLowerCase();
   if (lower.startsWith("claude")) return "anthropic";
@@ -192,85 +232,147 @@ function anthropicPricingCandidates(model: string): string[] {
   return [model];
 }
 
-function mapToOfficialPricingKey(source: {
+function resolveModelForProvider(providerID: string, normalizedModel: string): string | null {
+  if (!isModelsDevProviderId(providerID)) return null;
+  if (hasModel(providerID, normalizedModel)) return normalizedModel;
+
+  // Some source ids include "-thinking" while snapshot keeps a base key (or vice versa).
+  if (normalizedModel.toLowerCase().endsWith("-thinking")) {
+    const withoutThinking = normalizedModel.slice(0, -"-thinking".length);
+    if (hasModel(providerID, withoutThinking)) return withoutThinking;
+  }
+
+  // Kimi naming: some logs use kimi-k2, while snapshot may use kimi-k2-thinking.
+  if (providerID === "moonshotai" && normalizedModel === "kimi-k2") {
+    if (hasModel("moonshotai", "kimi-k2-thinking")) return "kimi-k2-thinking";
+  }
+
+  // Gemini naming fallback: some logs omit -preview.
+  if (providerID === "google") {
+    if (normalizedModel === "gemini-3-pro" && hasModel("google", "gemini-3-pro-preview")) {
+      return "gemini-3-pro-preview";
+    }
+    if (normalizedModel === "gemini-3-flash" && hasModel("google", "gemini-3-flash-preview")) {
+      return "gemini-3-flash-preview";
+    }
+  }
+
+  // Anthropic alias fallback: try alternative version keys when exact key is missing.
+  if (providerID === "anthropic") {
+    const candidates = anthropicPricingCandidates(normalizedModel);
+    for (const candidate of candidates) {
+      if (hasModel("anthropic", candidate)) return candidate;
+    }
+  }
+
+  return null;
+}
+
+export function resolvePricingKey(source: {
   providerID?: string;
   modelID?: string;
-}): { ok: true; key: PricedKey } | { ok: false; unknown: UnknownKey } {
-  // Smart fallback: if our provider inference yields a providerId that doesn't exist
-  // in the snapshot (e.g. provider renames like zai->zai, xai->zai), try to discover
-  // the provider by scanning snapshot providers for an exact modelId match.
-  // This is intentionally conservative (exact match only) to avoid bad pricing.
-  const tryFindProviderByExactModel = (normalizedModel: string): string | null => {
-    for (const p of listProviders()) {
-      if (lookupCost(p, normalizedModel)) return p;
-    }
-    return null;
-  };
+}): PricingResolution {
   const srcProvider = source.providerID ?? "unknown";
   const srcModel = source.modelID ?? "unknown";
 
   if (!source.modelID || typeof source.modelID !== "string") {
-    return { ok: false, unknown: { sourceProviderID: srcProvider, sourceModelID: srcModel } };
+    return {
+      ok: false,
+      unknown: { sourceProviderID: srcProvider, sourceModelID: srcModel, reason: "missing_model" },
+    };
   }
 
-  const normalizedModel = normalizeModelId(source.modelID);
-  const inferredProvider = inferOfficialProviderFromModelId(normalizedModel);
-  if (!inferredProvider) {
-    const found = tryFindProviderByExactModel(normalizedModel);
-    if (found) return { ok: true, key: { provider: found, model: normalizedModel } };
-
+  const parsed = parseModelIdHint(source.modelID);
+  if (!parsed.modelPart) {
     return {
       ok: false,
       unknown: {
         sourceProviderID: srcProvider,
         sourceModelID: srcModel,
-        mappedProvider: undefined,
-        mappedModel: normalizedModel,
+        reason: "missing_model",
       },
     };
   }
 
-  // If inferred provider doesn't exist in snapshot, try to locate the provider by exact match.
-  if (!lookupCost(inferredProvider, normalizedModel)) {
-    const found = tryFindProviderByExactModel(normalizedModel);
-    if (found) return { ok: true, key: { provider: found, model: normalizedModel } };
+  const normalizedModel = normalizeModelId(parsed.modelPart);
+  const sourceProviderHint = normalizeSourceProviderId(source.providerID);
+  const modelProviderHint = normalizeSourceProviderId(parsed.providerHint);
+
+  const tryProvider = (
+    providerID: string | undefined,
+    method: "source_provider" | "model_prefix" | "alias_fallback",
+  ): PricingResolution | null => {
+    if (!providerID) return null;
+    const modelID = resolveModelForProvider(providerID, normalizedModel);
+    if (!modelID) return null;
+    return { ok: true, key: { provider: providerID, model: modelID }, method };
+  };
+
+  const fromSourceProvider = tryProvider(sourceProviderHint, "source_provider");
+  if (fromSourceProvider) return fromSourceProvider;
+
+  const fromModelPrefix = tryProvider(modelProviderHint, "model_prefix");
+  if (fromModelPrefix) return fromModelPrefix;
+
+  const providerCandidates = listProvidersForModelId(normalizedModel);
+  if (providerCandidates.length === 1) {
+    const provider = providerCandidates[0]!;
+    return {
+      ok: true,
+      key: { provider, model: normalizedModel },
+      method: "unique_model",
+    };
+  }
+  if (providerCandidates.length > 1) {
+    const sortedCandidates = [...providerCandidates].sort((a, b) => a.localeCompare(b));
+    return {
+      ok: false,
+      unknown: {
+        sourceProviderID: srcProvider,
+        sourceModelID: srcModel,
+        mappedModel: normalizedModel,
+        normalizedModelID: normalizedModel,
+        providerCandidates: sortedCandidates,
+        reason: "ambiguous_model",
+      },
+    };
   }
 
-  // Kimi naming: some logs use kimi-k2-thinking, but models.dev doesn't have kimi-k2.
-  // Treat kimi-k2 as kimi-k2-thinking for pricing.
-  if (inferredProvider === "moonshotai") {
-    if (normalizedModel === "kimi-k2") {
-      if (lookupCost("moonshotai", "kimi-k2-thinking")) {
-        return { ok: true, key: { provider: "moonshotai", model: "kimi-k2-thinking" } };
-      }
-    }
+  const inferredProvider = inferOfficialProviderFromModelId(normalizedModel);
+  const inferred = tryProvider(inferredProvider ?? undefined, "alias_fallback");
+  if (inferred) return inferred;
+
+  if (inferredProvider) {
+    return {
+      ok: false,
+      unknown: {
+        sourceProviderID: srcProvider,
+        sourceModelID: srcModel,
+        mappedProvider: inferredProvider,
+        mappedModel: normalizedModel,
+        normalizedModelID: normalizedModel,
+        reason: "missing_provider",
+      },
+    };
   }
 
-  // Gemini naming fallback: some logs omit -preview
-  if (inferredProvider === "google") {
-    if (normalizedModel === "gemini-3-pro" && lookupCost("google", "gemini-3-pro") == null) {
-      if (lookupCost("google", "gemini-3-pro-preview")) {
-        return { ok: true, key: { provider: "google", model: "gemini-3-pro-preview" } };
-      }
-    }
-    if (normalizedModel === "gemini-3-flash" && lookupCost("google", "gemini-3-flash") == null) {
-      if (lookupCost("google", "gemini-3-flash-preview")) {
-        return { ok: true, key: { provider: "google", model: "gemini-3-flash-preview" } };
-      }
-    }
-  }
+  return {
+    ok: false,
+    unknown: {
+      sourceProviderID: srcProvider,
+      sourceModelID: srcModel,
+      mappedModel: normalizedModel,
+      normalizedModelID: normalizedModel,
+      reason: "missing_provider",
+    },
+  };
+}
 
-  // Anthropic alias fallback: try alternative version keys when exact key is missing
-  if (inferredProvider === "anthropic") {
-    const candidates = anthropicPricingCandidates(normalizedModel);
-    for (const candidate of candidates) {
-      if (lookupCost("anthropic", candidate)) {
-        return { ok: true, key: { provider: "anthropic", model: candidate } };
-      }
-    }
-  }
-
-  return { ok: true, key: { provider: inferredProvider, model: normalizedModel } };
+function mapToOfficialPricingKey(source: {
+  providerID?: string;
+  modelID?: string;
+}): PricingResolution {
+  return resolvePricingKey(source);
 }
 
 function calculateCostUsd(params: {
@@ -303,17 +405,20 @@ function classifyMissingPricing(params: {
   mappedProvider: string;
   mappedModel: string;
 }): { kind: "unpriced"; reason: string } | { kind: "unknown" } {
-  // If we don't even have provider coverage in the pricing snapshot,
-  // we cannot price these tokens.
+  // Defensive: if provider wasn't in snapshot we should treat this as unknown mapping.
   if (!hasProvider(params.mappedProvider)) {
-    return { kind: "unpriced", reason: "provider not in models.dev pricing snapshot" };
+    return { kind: "unknown" };
   }
 
-  // Heuristic: free-tier model ids usually have no token pricing.
-  if (params.mappedModel.toLowerCase().endsWith("-free")) {
-    return { kind: "unpriced", reason: "free-tier model id not priced in snapshot" };
+  // When provider/model exists in snapshot but has no numeric rates, classify as unpriced.
+  if (hasModel(params.mappedProvider, params.mappedModel)) {
+    if (params.mappedModel.toLowerCase().endsWith("-free")) {
+      return { kind: "unpriced", reason: "free-tier model id not priced in snapshot" };
+    }
+    return { kind: "unpriced", reason: "model id exists in snapshot but has no token pricing" };
   }
 
+  // Provider exists but model key missing from snapshot.
   return { kind: "unknown" };
 }
 
@@ -346,10 +451,14 @@ export async function aggregateUsage(params: {
   let unknownTotals = emptyBuckets();
   let unpricedTotals = emptyBuckets();
   let costTotal = 0;
+  const resolutionCache = new Map<string, PricingResolution>();
 
   for (const msg of messages) {
     const tokens = messageBuckets(msg);
-    const mapping = mapToOfficialPricingKey({ providerID: msg.providerID, modelID: msg.modelID });
+    const cacheKey = `${msg.providerID ?? ""}|||${msg.modelID ?? ""}`;
+    const cached = resolutionCache.get(cacheKey);
+    const mapping = cached ?? mapToOfficialPricingKey({ providerID: msg.providerID, modelID: msg.modelID });
+    if (!cached) resolutionCache.set(cacheKey, mapping);
 
     if (!mapping.ok) {
       unknownTotals = addBuckets(unknownTotals, tokens);
