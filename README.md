@@ -74,9 +74,9 @@ That's it. Providers are auto-detected based on your OpenCode configuration. Toa
 ### Provider-Specific Setup
 
 <details>
-<summary><strong>GitHub Copilot</strong> (usually no setup needed)</summary>
+<summary><strong>GitHub Copilot</strong></summary>
 
-Copilot works automatically if OpenCode has Copilot configured and logged in.
+**Setup:** Works automatically if OpenCode has Copilot configured and logged in.
 
 **Optional:** For more reliable quota reporting, provide a fine-grained PAT:
 
@@ -99,16 +99,16 @@ Tier options: `free`, `pro`, `pro+`, `business`, `enterprise`
 </details>
 
 <details>
-<summary><strong>OpenAI</strong> (no setup needed)</summary>
+<summary><strong>OpenAI</strong></summary>
 
-OpenAI works automatically if OpenCode has OpenAI/ChatGPT configured.
+**Setup:** Works automatically if OpenCode has OpenAI/ChatGPT configured.
 
 </details>
 
 <details>
-<summary><strong>Qwen Code (OAuth)</strong></summary>
+<summary><strong>Qwen Code</strong></summary>
 
-Requires OAuth credentials from the `opencode-qwencode-auth` plugin.
+**Setup:** Requires OAuth credentials from the `opencode-qwencode-auth` plugin.
 
 Quota output for Qwen is **local-only estimation**:
 
@@ -130,7 +130,7 @@ If the local Qwen state file is missing, `/quota_status` reports usage from a de
 <details>
 <summary><strong>Firmware AI</strong></summary>
 
-Works automatically if OpenCode has Firmware configured. Alternatively, provide an API key:
+**Setup:** Works automatically if OpenCode has Firmware configured. Alternatively, provide an API key:
 
 ```json
 {
@@ -156,7 +156,7 @@ The `apiKey` field supports `{env:VAR_NAME}` syntax or a direct key.
 <details>
 <summary><strong>Chutes AI</strong></summary>
 
-Works automatically if OpenCode has Chutes configured. Alternatively, provide an API key:
+**Setup:** Works automatically if OpenCode has Chutes configured. Alternatively, provide an API key:
 
 ```json
 {
@@ -180,7 +180,7 @@ Works automatically if OpenCode has Chutes configured. Alternatively, provide an
 <details>
 <summary><strong>Google Antigravity</strong></summary>
 
-Requires the `opencode-antigravity-auth` plugin for multi-account support:
+**Setup:** Requires the `opencode-antigravity-auth` plugin for multi-account support:
 
 ```json
 {
@@ -195,9 +195,9 @@ If you are troubleshooting, `/quota_status` prints the candidate paths checked f
 </details>
 
 <details>
-<summary><strong>Z.ai (Coding Plan)</strong></summary>
+<summary><strong>Z.ai</strong></summary>
 
-Works automatically if OpenCode has Z.ai (Coding Plan) configured.
+**Setup:** Works automatically if OpenCode has Z.ai (Coding Plan) configured.
 
 </details>
 

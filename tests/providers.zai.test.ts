@@ -1,0 +1,135 @@
+import { describe, expect, it, vi } from "vitest";
+
+import {
+  expectAttemptedWithErrorLabel,
+  expectAttemptedWithNoErrors,
+  expectNotAttempted,
+} from "./helpers/provider-assertions.js";
+import { zaiProvider } from "../src/providers/zai.js";
+
+vi.mock("../src/lib/zai.js", () => ({
+  queryZaiQuota: vi.fn(),
+}));
+
+describe("zai provider", () => {
+  it("returns attempted:false when not configured", async () => {
+    const { queryZaiQuota } = await import("../src/lib/zai.js");
+    (queryZaiQuota as any).mockResolvedValueOnce(null);
+
+    const out = await zaiProvider.fetch({} as any);
+    expectNotAttempted(out);
+  });
+
+  it("maps success into a single toast entry (classic) using worst window", async () => {
+    const { queryZaiQuota } = await import("../src/lib/zai.js");
+    (queryZaiQuota as any).mockResolvedValueOnce({
+      success: true,
+      label: "Z.ai",
+      windows: {
+        hourly: { percentRemaining: 80, resetTimeIso: "2026-01-01T00:00:00.000Z" },
+        weekly: { percentRemaining: 30, resetTimeIso: "2026-01-02T00:00:00.000Z" },
+        mcp: { percentRemaining: 90, resetTimeIso: "2026-01-03T00:00:00.000Z" },
+      },
+    });
+
+    const out = await zaiProvider.fetch({ config: { toastStyle: "classic" } } as any);
+    expectAttemptedWithNoErrors(out);
+    expect(out.entries).toEqual([
+      {
+        name: "Z.ai",
+        percentRemaining: 30,
+        resetTimeIso: "2026-01-02T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("maps success into grouped entries for all windows", async () => {
+    const { queryZaiQuota } = await import("../src/lib/zai.js");
+    (queryZaiQuota as any).mockResolvedValueOnce({
+      success: true,
+      label: "Z.ai",
+      windows: {
+        hourly: { percentRemaining: 85, resetTimeIso: "2026-01-01T00:00:00.000Z" },
+        weekly: { percentRemaining: 45, resetTimeIso: "2026-01-02T00:00:00.000Z" },
+        mcp: { percentRemaining: 70, resetTimeIso: "2026-01-03T00:00:00.000Z" },
+      },
+    });
+
+    const out = await zaiProvider.fetch({ config: { toastStyle: "grouped" } } as any);
+    expectAttemptedWithNoErrors(out);
+    expect(out.entries).toEqual([
+      {
+        name: "Z.ai Hourly",
+        group: "Z.ai",
+        label: "Hourly:",
+        percentRemaining: 85,
+        resetTimeIso: "2026-01-01T00:00:00.000Z",
+      },
+      {
+        name: "Z.ai Weekly",
+        group: "Z.ai",
+        label: "Weekly:",
+        percentRemaining: 45,
+        resetTimeIso: "2026-01-02T00:00:00.000Z",
+      },
+      {
+        name: "Z.ai MCP",
+        group: "Z.ai",
+        label: "MCP:",
+        percentRemaining: 70,
+        resetTimeIso: "2026-01-03T00:00:00.000Z",
+      },
+    ]);
+  });
+
+  it("maps errors into toast errors", async () => {
+    const { queryZaiQuota } = await import("../src/lib/zai.js");
+    (queryZaiQuota as any).mockResolvedValueOnce({
+      success: false,
+      error: "Unauthorized",
+    });
+
+    const out = await zaiProvider.fetch({} as any);
+    expectAttemptedWithErrorLabel(out, "Z.ai");
+  });
+
+  it("matches zai/glm model ids", () => {
+    expect(zaiProvider.matchesCurrentModel?.("zai/glm-4.5")).toBe(true);
+    expect(zaiProvider.matchesCurrentModel?.("glm/glm-4.5")).toBe(true);
+    expect(zaiProvider.matchesCurrentModel?.("anthropic/glm-4")).toBe(true);
+    expect(zaiProvider.matchesCurrentModel?.("openai/gpt-5")).toBe(false);
+  });
+
+  it("is available when provider ids include zai/glm/zai-coding-plan", async () => {
+    const makeCtx = (ids: string[]) =>
+      ({
+        client: {
+          config: {
+            providers: vi.fn().mockResolvedValue({ data: { providers: ids.map((id) => ({ id })) } }),
+            get: vi.fn(),
+          },
+        },
+        config: { googleModels: [] },
+      }) as any;
+
+    await expect(zaiProvider.isAvailable(makeCtx(["zai"]))).resolves.toBe(true);
+    await expect(zaiProvider.isAvailable(makeCtx(["glm"]))).resolves.toBe(true);
+    await expect(zaiProvider.isAvailable(makeCtx(["zai-coding-plan"]))).resolves.toBe(true);
+    await expect(zaiProvider.isAvailable(makeCtx(["openai"]))).resolves.toBe(false);
+  });
+
+  it("is not available when provider lookup throws", async () => {
+    const ctx = {
+      client: {
+        config: {
+          providers: vi.fn().mockRejectedValue(new Error("boom")),
+          get: vi.fn(),
+        },
+      },
+      config: { googleModels: [] },
+    } as any;
+
+    await expect(zaiProvider.isAvailable(ctx)).resolves.toBe(false);
+  });
+});
+
