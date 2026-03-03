@@ -27,6 +27,7 @@ import { aggregateUsage } from "./lib/quota-stats.js";
 import { fetchSessionTokensForDisplay } from "./lib/session-tokens.js";
 import { formatQuotaStatsReport } from "./lib/quota-stats-format.js";
 import { buildQuotaStatusReport, type SessionTokenError } from "./lib/quota-status.js";
+import { maybeRefreshPricingSnapshot } from "./lib/modelsdev-pricing.js";
 import { refreshGoogleTokensForAllAccounts } from "./lib/google.js";
 import { getQuotaProviderDisplayLabel } from "./lib/provider-metadata.js";
 import { hasQwenOAuthAuthCached, isQwenCodeModelId } from "./lib/qwen-auth.js";
@@ -440,9 +441,38 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     return configInFlight;
   }
 
+  async function kickPricingRefresh(params: {
+    reason: "init" | "tokens" | "status";
+    maxWaitMs?: number;
+  }): Promise<void> {
+    try {
+      const refreshPromise = maybeRefreshPricingSnapshot({ reason: params.reason });
+      const guardedRefreshPromise = refreshPromise.catch(() => undefined);
+      if (!params.maxWaitMs || params.maxWaitMs <= 0) {
+        void guardedRefreshPromise;
+        return;
+      }
+
+      await Promise.race([
+        guardedRefreshPromise,
+        new Promise<void>((resolve) => {
+          setTimeout(resolve, params.maxWaitMs);
+        }),
+      ]);
+    } catch (error) {
+      await log("Pricing refresh failed", {
+        reason: params.reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   // Best-effort async init (do not await)
   void (async () => {
     await refreshConfig();
+    if (config.enabled) {
+      void kickPricingRefresh({ reason: "init" });
+    }
 
     try {
       await typedClient.app.log({
@@ -905,8 +935,10 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     skewMs?: number;
     force?: boolean;
     sessionID?: string;
-  }): Promise<string> {
+  }): Promise<string | null> {
     await refreshConfig();
+    if (!config.enabled) return null;
+    await kickPricingRefresh({ reason: "status", maxWaitMs: 750 });
 
     const currentModel = await getCurrentModel(params.sessionID);
     const sessionModelLookup: "ok" | "not_found" | "no_session" = !params.sessionID
@@ -996,6 +1028,15 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
       try {
         const cmd = input.command;
         const sessionID = input.sessionID;
+        const isQuotaCommand =
+          cmd === "quota" || cmd === "quota_status" || isTokenReportCommand(cmd);
+
+        if (isQuotaCommand && !configLoaded) {
+          await refreshConfig();
+        }
+        if (isQuotaCommand && !config.enabled) {
+          handled();
+        }
 
         if (cmd === "quota") {
           // Separate cache for /quota so it doesn't pollute the toast cache.
@@ -1076,6 +1117,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
 
         // Handle token report commands (/tokens_*)
         if (isTokenReportCommand(cmd)) {
+          await kickPricingRefresh({ reason: "tokens", maxWaitMs: 750 });
           const spec = TOKEN_REPORT_COMMANDS_BY_ID.get(cmd)!;
 
           if (spec.kind === "between") {
@@ -1161,7 +1203,9 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
             force: parsed.value["force"] === true,
             sessionID,
           });
-          await injectRawOutput(sessionID, out);
+          if (out) {
+            await injectRawOutput(sessionID, out);
+          }
           handled();
         }
       } catch (err) {
@@ -1199,6 +1243,7 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
             force: args.force,
             sessionID: context.sessionID,
           });
+          if (!out) return "";
           context.metadata({ title: "Quota Status" });
           await injectRawOutput(context.sessionID, out);
           return ""; // Empty return - output already injected with noReply

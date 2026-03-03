@@ -6,6 +6,7 @@ import {
   SessionNotFoundError,
 } from "./opencode-storage.js";
 import {
+  hasCost,
   hasProvider,
   hasModel,
   isModelsDevProviderId,
@@ -151,6 +152,29 @@ function normalizeModelId(raw: string): string {
   return s;
 }
 
+function stripFreeSuffix(modelId: string): string | null {
+  if (!modelId.toLowerCase().endsWith("-free")) return null;
+  const stripped = modelId.slice(0, -"-free".length);
+  return stripped || null;
+}
+
+function freeSuffixCandidates(modelId: string): string[] {
+  const candidates = [modelId];
+  const stripped = stripFreeSuffix(modelId);
+  if (stripped) candidates.push(stripped);
+  return candidates.filter((value, index, list) => list.indexOf(value) === index);
+}
+
+function pickBestModelForProvider(providerID: string, candidates: readonly string[]): string | null {
+  for (const candidate of candidates) {
+    if (hasCost(providerID, candidate)) return candidate;
+  }
+  for (const candidate of candidates) {
+    if (hasModel(providerID, candidate)) return candidate;
+  }
+  return null;
+}
+
 function parseModelIdHint(rawModelId?: string): { providerHint?: string; modelPart?: string } {
   if (!rawModelId || typeof rawModelId !== "string") return {};
   const trimmed = rawModelId.trim();
@@ -232,9 +256,21 @@ function anthropicPricingCandidates(model: string): string[] {
   return [model];
 }
 
+function moonshotaiPricingCandidates(model: string): string[] {
+  const candidates: string[] = [];
+  for (const freeCandidate of freeSuffixCandidates(model)) {
+    candidates.push(freeCandidate);
+    if (freeCandidate.includes(".")) {
+      candidates.push(freeCandidate.replace(/\./g, "-"));
+    }
+  }
+  return candidates.filter((value, index, list) => list.indexOf(value) === index);
+}
+
 function resolveModelForProvider(providerID: string, normalizedModel: string): string | null {
   if (!isModelsDevProviderId(providerID)) return null;
-  if (hasModel(providerID, normalizedModel)) return normalizedModel;
+  const preferredDirect = pickBestModelForProvider(providerID, freeSuffixCandidates(normalizedModel));
+  if (preferredDirect) return preferredDirect;
 
   // Some source ids include "-thinking" while snapshot keeps a base key (or vice versa).
   if (normalizedModel.toLowerCase().endsWith("-thinking")) {
@@ -245,6 +281,14 @@ function resolveModelForProvider(providerID: string, normalizedModel: string): s
   // Kimi naming: some logs use kimi-k2, while snapshot may use kimi-k2-thinking.
   if (providerID === "moonshotai" && normalizedModel === "kimi-k2") {
     if (hasModel("moonshotai", "kimi-k2-thinking")) return "kimi-k2-thinking";
+  }
+
+  if (providerID === "moonshotai") {
+    const preferredMoonshot = pickBestModelForProvider(
+      "moonshotai",
+      moonshotaiPricingCandidates(normalizedModel),
+    );
+    if (preferredMoonshot) return preferredMoonshot;
   }
 
   // Gemini naming fallback: some logs omit -preview.
@@ -301,9 +345,10 @@ export function resolvePricingKey(source: {
   const tryProvider = (
     providerID: string | undefined,
     method: "source_provider" | "model_prefix" | "alias_fallback",
+    modelIDHint: string = normalizedModel,
   ): PricingResolution | null => {
     if (!providerID) return null;
-    const modelID = resolveModelForProvider(providerID, normalizedModel);
+    const modelID = resolveModelForProvider(providerID, modelIDHint);
     if (!modelID) return null;
     return { ok: true, key: { provider: providerID, model: modelID }, method };
   };
@@ -314,43 +359,74 @@ export function resolvePricingKey(source: {
   const fromModelPrefix = tryProvider(modelProviderHint, "model_prefix");
   if (fromModelPrefix) return fromModelPrefix;
 
-  const providerCandidates = listProvidersForModelId(normalizedModel);
-  if (providerCandidates.length === 1) {
-    const provider = providerCandidates[0]!;
-    return {
-      ok: true,
-      key: { provider, model: normalizedModel },
-      method: "unique_model",
-    };
+  const modelCandidates = freeSuffixCandidates(normalizedModel);
+  let ambiguousMatch: { model: string; providerCandidates: string[] } | null = null;
+
+  for (const candidateModel of modelCandidates) {
+    const providerCandidates = listProvidersForModelId(candidateModel);
+    if (providerCandidates.length === 1) {
+      const provider = providerCandidates[0]!;
+      return {
+        ok: true,
+        key: { provider, model: candidateModel },
+        method: "unique_model",
+      };
+    }
+
+    if (providerCandidates.length > 1) {
+      const inferredAmbiguousProvider = inferOfficialProviderFromModelId(candidateModel);
+      if (inferredAmbiguousProvider && providerCandidates.includes(inferredAmbiguousProvider)) {
+        const inferredFromAmbiguous = tryProvider(
+          inferredAmbiguousProvider,
+          "alias_fallback",
+          candidateModel,
+        );
+        if (inferredFromAmbiguous) return inferredFromAmbiguous;
+      }
+
+      if (!ambiguousMatch) {
+        ambiguousMatch = {
+          model: candidateModel,
+          providerCandidates: [...providerCandidates].sort((a, b) => a.localeCompare(b)),
+        };
+      }
+    }
   }
-  if (providerCandidates.length > 1) {
-    const sortedCandidates = [...providerCandidates].sort((a, b) => a.localeCompare(b));
+
+  if (ambiguousMatch) {
     return {
       ok: false,
       unknown: {
         sourceProviderID: srcProvider,
         sourceModelID: srcModel,
-        mappedModel: normalizedModel,
-        normalizedModelID: normalizedModel,
-        providerCandidates: sortedCandidates,
+        mappedModel: ambiguousMatch.model,
+        normalizedModelID: ambiguousMatch.model,
+        providerCandidates: ambiguousMatch.providerCandidates,
         reason: "ambiguous_model",
       },
     };
   }
 
-  const inferredProvider = inferOfficialProviderFromModelId(normalizedModel);
-  const inferred = tryProvider(inferredProvider ?? undefined, "alias_fallback");
-  if (inferred) return inferred;
+  let inferredMissing: { provider: string; model: string } | null = null;
+  for (const candidateModel of modelCandidates) {
+    const inferredProvider = inferOfficialProviderFromModelId(candidateModel);
+    const inferred = tryProvider(inferredProvider ?? undefined, "alias_fallback", candidateModel);
+    if (inferred) return inferred;
 
-  if (inferredProvider) {
+    if (inferredProvider && !inferredMissing) {
+      inferredMissing = { provider: inferredProvider, model: candidateModel };
+    }
+  }
+
+  if (inferredMissing) {
     return {
       ok: false,
       unknown: {
         sourceProviderID: srcProvider,
         sourceModelID: srcModel,
-        mappedProvider: inferredProvider,
-        mappedModel: normalizedModel,
-        normalizedModelID: normalizedModel,
+        mappedProvider: inferredMissing.provider,
+        mappedModel: inferredMissing.model,
+        normalizedModelID: inferredMissing.model,
         reason: "missing_provider",
       },
     };

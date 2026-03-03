@@ -13,10 +13,16 @@ import {
 } from "./qwen-local-quota.js";
 import { hasQwenOAuthAuth } from "./qwen-auth.js";
 import {
+  getPricingSnapshotHealth,
+  getPricingRefreshPolicy,
   getPricingSnapshotMeta,
+  getPricingSnapshotSource,
+  getRuntimePricingRefreshStatePath,
+  getRuntimePricingSnapshotPath,
   listProviders,
   getProviderModelCount,
   hasProvider as snapshotHasProvider,
+  readPricingRefreshState,
 } from "./modelsdev-pricing.js";
 import { getProviders } from "../providers/registry.js";
 import { getPackageVersion } from "./version.js";
@@ -416,12 +422,36 @@ export async function buildQuotaStatusReport(params: {
   const meta = getPricingSnapshotMeta();
   const providers = listProviders();
   const coverage = computePricingCoverageFromAgg(agg);
+  const refreshPolicy = getPricingRefreshPolicy(process.env);
+  const health = getPricingSnapshotHealth({
+    maxAgeMs: refreshPolicy.maxAgeMs,
+  });
+  const snapshotSource = getPricingSnapshotSource();
+  const runtimeSnapshotPath = getRuntimePricingSnapshotPath();
+  const refreshStatePath = getRuntimePricingRefreshStatePath();
+  const pricingRefreshState = await readPricingRefreshState();
 
   lines.push("");
   lines.push("pricing_snapshot:");
   lines.push(`- source: ${meta.source}`);
+  lines.push(`- active_source: ${snapshotSource}`);
   lines.push(`- generatedAt: ${new Date(meta.generatedAt).toISOString()}`);
   lines.push(`- units: ${meta.units}`);
+  lines.push(`- runtime_snapshot_path: ${runtimeSnapshotPath}`);
+  lines.push(`- refresh_state_path: ${refreshStatePath}`);
+  lines.push(
+    `- staleness: age_ms=${fmtInt(health.ageMs)} max_age_ms=${fmtInt(health.maxAgeMs)} stale=${health.stale ? "true" : "false"}`,
+  );
+  if (pricingRefreshState) {
+    lines.push(
+      `- refresh: last_attempt_at=${pricingRefreshState.lastAttemptAt ? new Date(pricingRefreshState.lastAttemptAt).toISOString() : "(none)"} last_success_at=${pricingRefreshState.lastSuccessAt ? new Date(pricingRefreshState.lastSuccessAt).toISOString() : "(none)"} last_failure_at=${pricingRefreshState.lastFailureAt ? new Date(pricingRefreshState.lastFailureAt).toISOString() : "(none)"} last_result=${pricingRefreshState.lastResult ?? "(none)"}`,
+    );
+    if (pricingRefreshState.lastError) {
+      lines.push(`- refresh_error: ${pricingRefreshState.lastError}`);
+    }
+  } else {
+    lines.push("- refresh: (no runtime refresh state yet)");
+  }
   lines.push(`- providers: ${providers.join(",")}`);
   lines.push(
     `- coverage_seen: priced_keys=${fmtInt(coverage.totals.pricedKeysSeen)} mapped_but_missing=${fmtInt(coverage.totals.mappedMissingKeysSeen)} unpriced_keys=${fmtInt(coverage.totals.unpricedKeysSeen)}`,

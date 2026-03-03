@@ -12,7 +12,7 @@ Track OpenCode quota & tokens via Toasts/Commands with zero context window pollu
 
 ![Image of quota toasts](https://github.com/slkiser/opencode-quota/blob/main/toast.png)
 
-**Token Report Commands** - Track token usage and estimated costs across sessions using only local OpenCode SQLite history plus the bundled models.dev snapshot (no network calls).
+**Token Report Commands** - Track token usage and estimated costs across sessions using local OpenCode SQLite history plus a local models.dev pricing snapshot. The plugin can refresh that local snapshot at runtime when stale.
 
 ![Image of /quota and /tokens_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
 
@@ -77,7 +77,39 @@ Token reporting commands are the `/tokens_*` family (there is no `/token` comman
 | Google Antigravity | `google-antigravity` | Multi-account via `opencode-antigravity-auth` |
 | Z.ai               | `zai`                | OpenCode auth (automatic)                     |
 
-Token pricing coverage is broader than quota provider support: `/tokens_*` maps usage against all provider/model entries present in the bundled models.dev data snapshot.
+Token pricing coverage is broader than quota provider support: `/tokens_*` maps usage against provider/model entries in the active local models.dev pricing snapshot.
+
+Pricing refresh ownership is now runtime-based:
+
+- A bundled snapshot (`src/data/modelsdev-pricing.min.json`) is always shipped as bootstrap/offline fallback.
+- At plugin runtime, when `experimental.quotaToast.enabled` is `true`, pricing refresh runs as a bounded best-effort check (once per process window, plus persisted attempt tracking) during init and before `/tokens_*` / `/quota_status` report paths.
+- If the active snapshot is older than 3 days, the plugin attempts to fetch `https://models.dev/api.json`, keeps only `input`, `output`, `cache_read`, `cache_write`, and writes a refreshed local runtime snapshot.
+- If fetch fails, reports continue using the last local snapshot (no hard failure).
+
+Runtime snapshot files are stored under the OpenCode cache directory:
+
+- `.../opencode/opencode-quota/modelsdev-pricing.runtime.min.json`
+- `.../opencode/opencode-quota/modelsdev-pricing.refresh-state.json`
+
+Runtime refresh toggles:
+
+```sh
+# Disable runtime pricing refresh
+OPENCODE_QUOTA_PRICING_AUTO_REFRESH=0
+
+# Change stale threshold (default: 3 days)
+OPENCODE_QUOTA_PRICING_MAX_AGE_DAYS=5
+```
+
+Maintainer-only bundled snapshot refresh (manual):
+
+```sh
+npm run pricing:refresh
+npm run pricing:refresh:if-stale
+npm run build
+```
+
+`pricing:refresh:if-stale` uses the same env knobs as runtime refresh (`OPENCODE_QUOTA_PRICING_AUTO_REFRESH`, `OPENCODE_QUOTA_PRICING_MAX_AGE_DAYS`).
 
 ### Provider-Specific Setup
 
@@ -215,7 +247,7 @@ All options go under `experimental.quotaToast` in `opencode.json` or `opencode.j
 
 | Option              | Default      | Description                                                                                          |
 | ------------------- | ------------ | ---------------------------------------------------------------------------------------------------- |
-| `enabled`           | `true`       | Enable/disable plugin                                                                                |
+| `enabled`           | `true`       | Enable/disable plugin. When `false`, `/quota`, `/quota_status`, and `/tokens_*` are strict no-ops. |
 | `enableToast`       | `true`       | Show popup toasts                                                                                    |
 | `toastStyle`        | `classic`    | Toast layout style: `classic` or `grouped`                                                           |
 | `enabledProviders`  | `"auto"`     | Provider IDs to query, or `"auto"` to detect                                                         |

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { listModelsForProvider, listProviders } from "../src/lib/modelsdev-pricing.js";
+import {
+  listModelsForProvider,
+  listProviders,
+  lookupCost,
+} from "../src/lib/modelsdev-pricing.js";
 import { resolvePricingKey } from "../src/lib/quota-stats.js";
 
 describe("resolvePricingKey snapshot coverage", () => {
@@ -45,5 +49,59 @@ describe("resolvePricingKey snapshot coverage", () => {
     expect(resolved.key.provider).toBe(providerID);
     expect(resolved.key.model).toBe(modelID);
   });
-});
 
+  it("maps copilot and proxy model variants to priced snapshot keys", () => {
+    const copilotHaiku = resolvePricingKey({
+      providerID: "github-copilot",
+      modelID: "github-copilot/claude-haiku-4.5",
+    });
+    expect(copilotHaiku.ok).toBe(true);
+    if (!copilotHaiku.ok) return;
+    expect(copilotHaiku.key).toEqual({ provider: "anthropic", model: "claude-haiku-4-5" });
+
+    const copilotGrok = resolvePricingKey({
+      providerID: "github-copilot",
+      modelID: "github-copilot/grok-code-fast-1",
+    });
+    expect(copilotGrok.ok).toBe(true);
+    if (!copilotGrok.ok) return;
+    expect(copilotGrok.key).toEqual({ provider: "xai", model: "grok-code-fast-1" });
+
+    const kimiBase = resolvePricingKey({
+      providerID: "CLIProxyAPI",
+      modelID: "moonshotai/kimi-k2.5",
+    });
+    expect(kimiBase.ok).toBe(true);
+    if (!kimiBase.ok) return;
+    expect(kimiBase.key).toEqual({ provider: "moonshotai", model: "kimi-k2.5" });
+
+    const kimiFree = resolvePricingKey({
+      providerID: "opencode",
+      modelID: "opencode/kimi-k2.5-free",
+    });
+    expect(kimiFree.ok).toBe(true);
+    if (!kimiFree.ok) return;
+    expect(kimiFree.key).toEqual({ provider: "moonshotai", model: "kimi-k2.5" });
+
+    const openaiFreeKnownProvider = resolvePricingKey({
+      providerID: "openai",
+      modelID: "openai/gpt-4o-mini-free",
+    });
+    expect(openaiFreeKnownProvider.ok).toBe(true);
+    if (!openaiFreeKnownProvider.ok) return;
+    expect(openaiFreeKnownProvider.key).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+
+    const openaiFreeModelPrefix = resolvePricingKey({
+      providerID: "connector-without-pricing-id",
+      modelID: "openai/gpt-4o-mini-free",
+    });
+    expect(openaiFreeModelPrefix.ok).toBe(true);
+    if (!openaiFreeModelPrefix.ok) return;
+    expect(openaiFreeModelPrefix.key).toEqual({ provider: "openai", model: "gpt-4o-mini" });
+
+    expect(lookupCost("anthropic", "claude-haiku-4-5")).not.toBeNull();
+    expect(lookupCost("xai", "grok-code-fast-1")).not.toBeNull();
+    expect(lookupCost("moonshotai", "kimi-k2.5")).not.toBeNull();
+    expect(lookupCost("openai", "gpt-4o-mini")).not.toBeNull();
+  });
+});

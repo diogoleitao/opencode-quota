@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(),
   readAuthFileCached: vi.fn(),
   recordQwenCompletion: vi.fn(),
+  maybeRefreshPricingSnapshot: vi.fn(),
 }));
 
 vi.mock("@opencode-ai/plugin", () => {
@@ -47,6 +48,10 @@ vi.mock("../src/lib/qwen-local-quota.js", () => ({
   getQwenLocalQuotaPath: vi.fn(() => "/tmp/qwen-local-quota.json"),
 }));
 
+vi.mock("../src/lib/modelsdev-pricing.js", () => ({
+  maybeRefreshPricingSnapshot: mocks.maybeRefreshPricingSnapshot,
+}));
+
 function createClient(modelID: string) {
   return {
     config: {
@@ -82,6 +87,11 @@ describe("plugin qwen question hook", () => {
       dayCount: 1,
       recent: [],
       updatedAt: 1,
+    });
+    mocks.maybeRefreshPricingSnapshot.mockResolvedValue({
+      attempted: false,
+      updated: false,
+      state: { version: 1, updatedAt: Date.now() },
     });
   });
 

@@ -6,6 +6,7 @@ import { DEFAULT_CONFIG } from "../src/lib/types.js";
 const mocks = vi.hoisted(() => ({
   loadConfig: vi.fn(),
   getProviders: vi.fn(),
+  maybeRefreshPricingSnapshot: vi.fn(),
 }));
 
 vi.mock("@opencode-ai/plugin", () => {
@@ -34,6 +35,10 @@ vi.mock("../src/lib/config.js", () => ({
 
 vi.mock("../src/providers/registry.js", () => ({
   getProviders: mocks.getProviders,
+}));
+
+vi.mock("../src/lib/modelsdev-pricing.js", () => ({
+  maybeRefreshPricingSnapshot: mocks.maybeRefreshPricingSnapshot,
 }));
 
 function createClient() {
@@ -65,6 +70,11 @@ describe("plugin command handled boundary", () => {
       enabled: true,
     });
     mocks.getProviders.mockReturnValue([]);
+    mocks.maybeRefreshPricingSnapshot.mockResolvedValue({
+      attempted: false,
+      updated: false,
+      state: { version: 1, updatedAt: Date.now() },
+    });
   });
 
   it("propagates command-handled sentinel errors to abort command pipeline", async () => {
@@ -100,5 +110,26 @@ describe("plugin command handled boundary", () => {
         sessionID: "session-2",
       } as any),
     ).rejects.toThrow("boom");
+  });
+
+  it("treats handled slash commands as strict no-op when disabled", async () => {
+    mocks.loadConfig.mockResolvedValue({
+      ...DEFAULT_CONFIG,
+      enabled: false,
+    });
+
+    const { QuotaToastPlugin } = await import("../src/plugin.js");
+    const client = createClient();
+    const hooks = await QuotaToastPlugin({ client } as any);
+
+    await expect(
+      hooks["command.execute.before"]?.({
+        command: "tokens_daily",
+        sessionID: "session-disabled",
+      } as any),
+    ).rejects.toThrow(COMMAND_HANDLED_SENTINEL);
+
+    expect(mocks.maybeRefreshPricingSnapshot).not.toHaveBeenCalled();
+    expect(client.session.prompt).not.toHaveBeenCalled();
   });
 });

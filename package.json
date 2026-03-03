@@ -18,6 +18,8 @@
   ],
   "scripts": {
     "build": "tsc && node scripts/copy-data.mjs",
+    "pricing:refresh": "node scripts/refresh-modelsdev-pricing.mjs",
+    "pricing:refresh:if-stale": "node scripts/refresh-modelsdev-pricing-if-stale.mjs",
     "verify:release-version": "node scripts/verify-release-version.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
