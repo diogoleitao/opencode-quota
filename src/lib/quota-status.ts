@@ -6,6 +6,7 @@ import { getGoogleTokenCachePath } from "./google-token-cache.js";
 import { getAntigravityAccountsCandidatePaths, readAntigravityAccounts } from "./google.js";
 import { getFirmwareKeyDiagnostics } from "./firmware.js";
 import { getChutesKeyDiagnostics } from "./chutes.js";
+import { getCopilotQuotaAuthDiagnostics } from "./copilot.js";
 import {
   computeQwenQuota,
   getQwenLocalQuotaPath,
@@ -334,6 +335,33 @@ export async function buildQuotaStatusReport(params: {
     lines.push(`- chutes api key checked: ${chutesDiag.checkedPaths.join(" | ")}`);
   }
 
+  const copilotDiag = getCopilotQuotaAuthDiagnostics(authData);
+  lines.push("");
+  lines.push("copilot_quota_auth:");
+  lines.push(`- pat_state: ${copilotDiag.pat.state}`);
+  if (copilotDiag.pat.selectedPath) {
+    lines.push(`- pat_path: ${copilotDiag.pat.selectedPath}`);
+  }
+  if (copilotDiag.pat.tokenKind) {
+    lines.push(`- pat_token_kind: ${copilotDiag.pat.tokenKind}`);
+  }
+  if (copilotDiag.pat.config?.tier) {
+    lines.push(`- pat_tier: ${copilotDiag.pat.config.tier}`);
+  }
+  if (copilotDiag.pat.config?.organization) {
+    lines.push(`- pat_organization: ${copilotDiag.pat.config.organization}`);
+  }
+  if (copilotDiag.pat.error) {
+    lines.push(`- pat_error: ${copilotDiag.pat.error}`);
+  }
+  lines.push(
+    `- pat_checked_paths: ${copilotDiag.pat.checkedPaths.length ? copilotDiag.pat.checkedPaths.join(" | ") : "(none)"}`,
+  );
+  lines.push(
+    `- oauth_configured: ${copilotDiag.oauth.configured ? "true" : "false"} key=${copilotDiag.oauth.keyName ?? "(none)"} refresh=${copilotDiag.oauth.hasRefreshToken ? "true" : "false"} access=${copilotDiag.oauth.hasAccessToken ? "true" : "false"}`,
+  );
+  lines.push(`- effective_source: ${copilotDiag.effectiveSource}`);
+  lines.push(`- override: ${copilotDiag.override}`);
   const googleTokenCachePath = getGoogleTokenCachePath();
   lines.push(
     `- google token cache: ${googleTokenCachePath}${(await pathExists(googleTokenCachePath)) ? "" : " (missing)"}`,

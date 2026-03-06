@@ -69,7 +69,7 @@ Token reporting commands are the `/tokens_*` family (there is no `/token` comman
 
 | Provider           | Config ID            | Auth Source                                   |
 | ------------------ | -------------------- | --------------------------------------------- |
-| GitHub Copilot     | `copilot`            | OpenCode auth (automatic)                     |
+| GitHub Copilot     | `copilot`            | OpenCode auth (automatic), PAT for org billing |
 | OpenAI (Plus/Pro)  | `openai`             | OpenCode auth (automatic)                     |
 | Qwen Code (OAuth)  | `qwen-code`          | OpenCode auth via `opencode-qwencode-auth`    |
 | Firmware AI        | `firmware`           | OpenCode auth or API key                      |
@@ -116,26 +116,33 @@ npm run build
 <details>
 <summary><strong>GitHub Copilot</strong></summary>
 
-**Setup:** Works automatically if OpenCode has Copilot configured and logged in.
+**Setup:** Personal Copilot usage works automatically when OpenCode has Copilot configured and logged in.
 
-**Optional:** For more reliable quota reporting, provide a fine-grained PAT:
+**Personal usage:** No extra setup required. The plugin uses OpenCode auth to query your user billing report.
 
-1. Create a fine-grained PAT at GitHub with **Account permissions > Plan > Read**
-2. Create `copilot-quota-token.json` under OpenCode's runtime config directory (see `opencode debug paths`):
+**Organization usage:** Create `copilot-quota-token.json` under OpenCode's runtime config directory (see `opencode debug paths`).
+
+Organization example:
 
 ```json
 {
   "token": "github_pat_...",
-  "tier": "pro"
+  "tier": "business",
+  "organization": "your-org-slug"
 }
 ```
 
-`username` is optional (kept for backwards compatibility). If provided, it is used only as a fallback for legacy GitHub REST paths.
+For organization-managed Copilot plans such as `business` or `enterprise`, `organization` is required. `username` is optional and is only used as the `?user=` filter on the organization report.
 
-Both fine-grained PATs (`github_pat_...`) and classic PATs (`ghp_...`) should work. Fine-grained PATs must include **Account permissions > Plan > Read**.
+- **Organization PAT permission:** fine-grained PAT with **Organization permissions > Administration > Read**.
 
 Tier options: `free`, `pro`, `pro+`, `business`, `enterprise`
 
+If both OpenCode Copilot auth and `copilot-quota-token.json` are present, the plugin uses the PAT config first.
+
+For personal plans, a PAT is optional. Use it only if you want an explicit tier override for quota totals.
+
+Run `/quota_status` and check `copilot_quota_auth` to confirm `pat_state`, `pat_organization`, candidate paths checked, and `effective_source`/`override`.
 </details>
 
 <details>
@@ -386,7 +393,8 @@ After configuration, instruct the user to:
 
 - **Toast not showing**: Run `/quota_status` to diagnose
 - **Google Antigravity not working**: Ensure `opencode-antigravity-auth` plugin is installed and accounts are configured
-- **Copilot quota unreliable**: Consider setting up a fine-grained PAT (see Provider-Specific Setup above)
+- **Copilot quota unreliable**: For personal plans, OpenCode auth should work without extra setup; add `copilot-quota-token.json` only if you need a PAT-based override
+- **Copilot organization-managed usage missing**: Add `"organization": "your-org-slug"` to `copilot-quota-token.json` so the plugin uses the organization billing report
 
 </details>
 

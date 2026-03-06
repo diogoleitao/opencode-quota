@@ -14,7 +14,7 @@ export const copilotProvider: QuotaProvider = {
     try {
       const resp = await ctx.client.config.providers();
       const ids = new Set((resp.data?.providers ?? []).map((p) => p.id));
-      return ids.has("github-copilot") || ids.has("copilot") || ids.has("copilot-chat");
+      return ids.has("github-copilot") || ids.has("copilot") || ids.has("copilot-chat") || ids.has("github-copilot-chat");
     } catch {
       return false;
     }

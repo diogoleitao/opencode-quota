@@ -117,17 +117,25 @@ export type CopilotTier = "free" | "pro" | "pro+" | "business" | "enterprise";
  * Copilot quota token configuration.
  *
  * Stored locally in:
- * - $XDG_CONFIG_HOME/opencode/copilot-quota-token.json, or
- * - ~/.config/opencode/copilot-quota-token.json
+ * - OpenCode runtime config candidate directories as
+ *   `.../opencode/copilot-quota-token.json`
+ *   (for example `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`)
  *
  * Users can create a fine-grained PAT with "Plan" read permission
  * to enable quota checking via GitHub's public billing API.
  */
 export interface CopilotQuotaConfig {
-  /** Fine-grained PAT with "Plan" read permission */
+  /** Fine-grained PAT with GitHub billing-report access */
   token: string;
-  /** GitHub username (optional; used for legacy /users/{username} fallback) */
+  /** Optional user login override for user-scoped reports or org user filtering */
   username?: string;
+  /**
+   * Optional organization slug for organization-scoped premium request reports.
+   *
+   * When present, the plugin queries
+   * `/organizations/{org}/settings/billing/premium_request/usage`.
+   */
+  organization?: string;
   /** Copilot subscription tier (determines monthly quota limit) */
   tier: CopilotTier;
 }
@@ -135,6 +143,9 @@ export interface CopilotQuotaConfig {
 /** Full auth.json structure (partial - only what we need) */
 export interface AuthData {
   "github-copilot"?: CopilotAuthData;
+  copilot?: CopilotAuthData;
+  "copilot-chat"?: CopilotAuthData;
+  "github-copilot-chat"?: CopilotAuthData;
   google?: {
     type: string;
     access?: string;
@@ -234,45 +245,6 @@ export interface GoogleQuotaResponse {
   >;
 }
 
-/** Copilot API response includes a quota reset date */
-export interface CopilotQuotaResponseWithReset extends CopilotUsageResponse {
-  quota_reset_date: string;
-}
-
-// =============================================================================
-// Copilot API Types
-// =============================================================================
-
-interface QuotaDetail {
-  entitlement: number;
-  overage_count: number;
-  overage_permitted: boolean;
-  percent_remaining: number;
-  quota_id: string;
-  quota_remaining: number;
-  remaining: number;
-  unlimited: boolean;
-}
-
-interface QuotaSnapshots {
-  chat?: QuotaDetail;
-  completions?: QuotaDetail;
-  premium_interactions: QuotaDetail;
-}
-
-export interface CopilotUsageResponse {
-  access_type_sku: string;
-  analytics_tracking_id: string;
-  assigned_date: string;
-  can_signup_for_limited: boolean;
-  chat_enabled: boolean;
-  copilot_plan: string;
-  organization_login_list: unknown[];
-  organization_list: unknown[];
-  quota_reset_date: string;
-  quota_snapshots: QuotaSnapshots;
-}
-
 // =============================================================================
 // Z.ai Types
 // =============================================================================
@@ -368,10 +340,10 @@ export type GoogleResult = GoogleQuotaResult | QuotaError | null;
 export type ZaiResult = ZaiQuotaResult | QuotaError | null;
 export type ChutesResult =
   | {
-      success: true;
-      percentRemaining: number;
-      resetTimeIso?: string;
-    }
+    success: true;
+    percentRemaining: number;
+    resetTimeIso?: string;
+  }
   | QuotaError
   | null;
 
