@@ -5,7 +5,7 @@
 - Automatic quota toasts after assistant responses
 - Manual `/quota` and `/tokens_*` commands for deeper local reporting with zero context window pollution
 
-**Quota provider supports**: GitHub Copilot, OpenAI (Plus/Pro), Cursor, Qwen Code, Alibaba Coding Plan, Chutes AI, Firmware AI, Google Antigravity, and Z.ai coding plan.
+**Quota provider supports**: GitHub Copilot, OpenAI (Plus/Pro), Cursor (ACP), Qwen Code, Alibaba Coding Plan, Chutes AI, Firmware AI, Google Antigravity, and Z.ai coding plan.
 
 **Token provider supports**: All models and providers in [models.dev](https://models.dev), plus deterministic local pricing for Cursor Auto/Composer and Cursor model aliases that are not on models.dev.
 
@@ -53,9 +53,19 @@ If you already use Copilot, OpenAI, Firmware, Chutes, or Z.ai in OpenCode, start
 }
 ```
 
+### Cursor
+
+Cursor model support requires the `opencode-cursor` [companion ACP plugin](https://github.com/Nomadcxx/opencode-cursor):
+
+```jsonc
+{
+  "plugin": ["@rama_nigg/open-cursor", "@slkiser/opencode-quota"]
+}
+```
+
 ### Google Antigravity
 
-Google quota support depends on the companion auth plugin:
+Google quota support requires the `opencode-antigravity-auth` [companion auth plugin](https://github.com/NoeFabris/opencode-antigravity-auth):
 
 ```jsonc
 {
@@ -65,7 +75,7 @@ Google quota support depends on the companion auth plugin:
 
 ### Qwen Code
 
-Qwen quota support depends on the companion auth plugin:
+Qwen quota support requires the `opencode-qwencode-auth` [companion auth plugin](https://github.com/gustavodiasdev/opencode-qwencode-auth):
 
 ```jsonc
 {
@@ -73,17 +83,7 @@ Qwen quota support depends on the companion auth plugin:
 }
 ```
 
-### Cursor
-
-Cursor model support requires the `opencode-cursor` project/plugin. In `opencode.json`, use the npm plugin name:
-
-```jsonc
-{
-  "plugin": ["@rama_nigg/open-cursor", "@slkiser/opencode-quota"]
-}
-```
-
-Quota and `/tokens_*` output are computed from local OpenCode session history. The plugin does not call Cursor model APIs to build reports.
+Quota and `/tokens_*` output are computed from local OpenCode session history.
 
 ## Commands
 
@@ -214,7 +214,7 @@ No extra setup is required if OpenCode already has OpenAI or ChatGPT auth config
 <details>
 <summary><strong>Cursor</strong></summary>
 
-Cursor support requires the `opencode-cursor` project/plugin and stays local-only and deterministic once `@rama_nigg/open-cursor` is installed in OpenCode.
+Cursor support requires the `opencode-cursor` plugin and stays local-only and deterministic once `@rama_nigg/open-cursor` is installed in OpenCode.
 
 Current behavior:
 
