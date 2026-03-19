@@ -75,11 +75,11 @@ Qwen quota support depends on the companion auth plugin:
 
 ### Cursor
 
-Cursor model support works with the Cursor OpenCode provider integration, for example:
+Cursor model support requires the `opencode-cursor` project/plugin. In `opencode.json`, use the npm plugin name:
 
 ```jsonc
 {
-  "plugin": ["cursor-acp", "@slkiser/opencode-quota"]
+  "plugin": ["@rama_nigg/open-cursor", "@slkiser/opencode-quota"]
 }
 ```
 
@@ -147,7 +147,7 @@ If Alibaba Coding Plan auth does not include a `tier`, you can set the fallback 
 | --- | --- | --- |
 | GitHub Copilot | Usually yes | Add `copilot-quota-token.json` only for managed org or enterprise billing |
 | OpenAI | Yes | None |
-| Cursor | Usually yes | Optional `cursorPlan`, `cursorIncludedApiUsd`, and `cursorBillingCycleStartDay` for monthly API budget tracking |
+| Cursor | Needs `opencode-cursor` | Optional `cursorPlan`, `cursorIncludedApiUsd`, and `cursorBillingCycleStartDay` for monthly API budget tracking |
 | Qwen Code | Needs `opencode-qwencode-auth` | Local free-tier request estimation |
 | Alibaba Coding Plan | Yes | Local request-count estimation |
 | Firmware AI | Usually yes | Optional API key |
@@ -214,7 +214,7 @@ No extra setup is required if OpenCode already has OpenAI or ChatGPT auth config
 <details>
 <summary><strong>Cursor</strong></summary>
 
-Cursor support is local-only and deterministic.
+Cursor support requires the `opencode-cursor` project/plugin and stays local-only and deterministic once `@rama_nigg/open-cursor` is installed in OpenCode.
 
 Current behavior:
 
@@ -451,7 +451,7 @@ If you are using an agent to install the plugin for you, the safe default is:
 
 Then verify with `/quota_status`.
 
-Only add explicit `enabledProviders` if you want to limit which providers are queried. Only add companion plugins when the user actually uses Google Antigravity or Qwen Code.
+Only add explicit `enabledProviders` if you want to limit which providers are queried. Only add companion plugins when the user actually uses Google Antigravity or Qwen Code, and only add `@rama_nigg/open-cursor` when the user actually uses Cursor models in OpenCode.
 
 ## License
 
