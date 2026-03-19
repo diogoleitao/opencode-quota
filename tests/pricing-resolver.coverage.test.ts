@@ -5,6 +5,7 @@ import {
   listProviders,
   lookupCost,
 } from "../src/lib/modelsdev-pricing.js";
+import { CURSOR_OFFICIAL_MODEL_ALIASES } from "../src/lib/cursor-pricing.js";
 import { resolvePricingKey } from "../src/lib/quota-stats.js";
 
 describe("resolvePricingKey snapshot coverage", () => {
@@ -137,5 +138,45 @@ describe("resolvePricingKey snapshot coverage", () => {
     expect(anthropic.ok).toBe(true);
     if (!anthropic.ok) return;
     expect(anthropic.key).toEqual({ provider: "anthropic", model: "claude-sonnet-4-6" });
+  });
+
+  it("keeps every Cursor API alias aligned with a priced snapshot key", () => {
+    const failures: string[] = [];
+
+    for (const alias of Object.keys(CURSOR_OFFICIAL_MODEL_ALIASES).sort()) {
+      const target = CURSOR_OFFICIAL_MODEL_ALIASES[alias];
+      if (!target || target.providerHint === "cursor") continue;
+
+      const resolved = resolvePricingKey({
+        providerID: "cursor-acp",
+        modelID: `cursor-acp/${alias}`,
+      });
+
+      if (!resolved.ok) {
+        failures.push(`${alias} -> unresolved`);
+        continue;
+      }
+
+      if (resolved.method !== "cursor_api_alias") {
+        failures.push(`${alias} -> unexpected method ${resolved.method}`);
+        continue;
+      }
+
+      if (
+        resolved.key.provider !== target.providerHint ||
+        resolved.key.model !== target.modelHint
+      ) {
+        failures.push(
+          `${alias} -> ${resolved.key.provider}/${resolved.key.model} (expected ${target.providerHint}/${target.modelHint})`,
+        );
+        continue;
+      }
+
+      if (!lookupCost(resolved.key.provider, resolved.key.model)) {
+        failures.push(`${alias} -> missing priced snapshot key ${resolved.key.provider}/${resolved.key.model}`);
+      }
+    }
+
+    expect(failures).toEqual([]);
   });
 });

@@ -42,10 +42,12 @@ const CURSOR_LOCAL_PRICING: Readonly<Record<CursorLocalPricingModel, CostBuckets
   },
 };
 
-const CURSOR_OFFICIAL_MODEL_ALIASES: Readonly<Record<string, { providerHint: string; modelHint: string }>> = {
-  "gemini-3-flash": { providerHint: "google", modelHint: "gemini-3-flash" },
-  "gemini-3-pro": { providerHint: "google", modelHint: "gemini-3-pro" },
-  "gemini-3.1-pro": { providerHint: "google", modelHint: "gemini-3.1-pro" },
+export const CURSOR_OFFICIAL_MODEL_ALIASES: Readonly<
+  Record<string, { providerHint: string; modelHint: string }>
+> = {
+  "gemini-3-flash": { providerHint: "google", modelHint: "gemini-3-flash-preview" },
+  "gemini-3-pro": { providerHint: "google", modelHint: "gemini-3-pro-preview" },
+  "gemini-3.1-pro": { providerHint: "google", modelHint: "gemini-3.1-pro-preview" },
   "gpt-5.2": { providerHint: "openai", modelHint: "gpt-5.2" },
   "gpt-5.3-codex": { providerHint: "openai", modelHint: "gpt-5.3-codex" },
   "gpt-5.4": { providerHint: "openai", modelHint: "gpt-5.4" },
