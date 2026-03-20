@@ -66,14 +66,25 @@ export function stripJsonComments(content: string): string {
 }
 
 /**
+ * Strip trailing commas from JSON content.
+ *
+ * Removes commas that appear before closing brackets/braces,
+ * while preserving commas inside strings.
+ */
+export function stripTrailingCommas(content: string): string {
+  return content.replace(/,\s*([\]}])/g, "$1");
+}
+
+/**
  * Parse JSON or JSONC content.
  *
  * @param content - The file content to parse
- * @param isJsonc - If true, strip comments before parsing
+ * @param isJsonc - If true, strip comments and trailing commas before parsing
  * @returns Parsed JSON value
  * @throws SyntaxError if the content is not valid JSON
  */
 export function parseJsonOrJsonc(content: string, isJsonc: boolean): unknown {
-  const toParse = isJsonc ? stripJsonComments(content) : content;
+  let toParse = isJsonc ? stripJsonComments(content) : content;
+  toParse = stripTrailingCommas(toParse);
   return JSON.parse(toParse);
 }
