@@ -35,7 +35,16 @@ Then:
 
 That is enough for most installs. Providers are auto-detected from your existing OpenCode setup.
 
-### Cursor install in one block
+## What You Get
+
+- Toasts after assistant responses, idle transitions, and compaction events
+- `/quota` for a grouped manual quota report such as `[OpenAI] (Pro)` or `[Copilot] (business)`, with a local call timestamp in the heading
+- `/tokens_*` commands backed by local OpenCode history and a local pricing snapshot, each with a local call timestamp in the heading
+- No model calls to compute the toast or report output
+
+## Companion Plugins When Needed
+
+### Cursor
 
 If you use Cursor in OpenCode, install the Cursor companion plugin and quota config together:
 
@@ -66,15 +75,6 @@ opencode auth login --provider cursor
 Restart or reload OpenCode, then run `/quota_status`.
 
 If you only want usage tracking and do not care about Cursor budget percentage remaining, you can omit the `experimental.quotaToast` block or set `"cursorPlan": "none"`.
-
-## What You Get
-
-- Toasts after assistant responses, idle transitions, and compaction events
-- `/quota` for a grouped manual quota report such as `[OpenAI] (Pro)` or `[Copilot] (business)`, with a local call timestamp in the heading
-- `/tokens_*` commands backed by local OpenCode history and a local pricing snapshot, each with a local call timestamp in the heading
-- No model calls to compute the toast or report output
-
-## Companion Plugins When Needed
 
 ### Google Antigravity
 
