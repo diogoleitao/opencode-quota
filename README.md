@@ -72,8 +72,6 @@ If Alibaba Coding Plan auth does not include a `tier`, you can set the fallback 
 }
 ```
 
-`/quota` already uses grouped formatting by default, even if toast style stays `classic`.
-
 </details>
 
 ## Provider Setup At A Glance
@@ -90,23 +88,8 @@ If Alibaba Coding Plan auth does not include a `tier`, you can set the fallback 
 | Google Antigravity | Needs `opencode-antigravity-auth` | Multi-account account file lives in OpenCode runtime config |
 | Z.ai | Yes | None |
 
-## Commands
-
-| Command | What it shows |
-| --- | --- |
-| `/quota` | Manual grouped quota report with a local call timestamp |
-| `/quota_status` | Concise diagnostics for config, provider availability, account detection, and pricing snapshot health |
-| `/tokens_today` | Tokens used today (calendar day) |
-| `/tokens_daily` | Tokens used in the last 24 hours |
-| `/tokens_weekly` | Tokens used in the last 7 days |
-| `/tokens_monthly` | Tokens used in the last 30 days, including pricing sections |
-| `/tokens_all` | Tokens used across all local history |
-| `/tokens_session` | Tokens used in the current session |
-| `/tokens_between` | Tokens used between two dates: `YYYY-MM-DD YYYY-MM-DD` |
-
-There is no `/token` command. The reporting commands are the `/tokens_*` family.
-
-## Companion Plugins When Needed
+<details>
+<summary><strong>Companion Plugin Setup</strong></summary>
 
 ### Cursor
 
@@ -155,6 +138,24 @@ Qwen quota support requires the `opencode-qwencode-auth` [companion auth plugin]
   "plugin": ["opencode-qwencode-auth", "@slkiser/opencode-quota"]
 }
 ```
+
+</details>
+
+## Commands
+
+| Command | What it shows |
+| --- | --- |
+| `/quota` | Manual grouped quota report with a local call timestamp |
+| `/quota_status` | Concise diagnostics for config, provider availability, account detection, and pricing snapshot health |
+| `/tokens_today` | Tokens used today (calendar day) |
+| `/tokens_daily` | Tokens used in the last 24 hours |
+| `/tokens_weekly` | Tokens used in the last 7 days |
+| `/tokens_monthly` | Tokens used in the last 30 days, including pricing sections |
+| `/tokens_all` | Tokens used across all local history |
+| `/tokens_session` | Tokens used in the current session |
+| `/tokens_between` | Tokens used between two dates: `YYYY-MM-DD YYYY-MM-DD` |
+
+There is no `/token` command. The reporting commands are the `/tokens_*` family.
 
 ## Provider-Specific Notes
 
