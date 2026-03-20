@@ -9,6 +9,8 @@
 
 **Token reports**: All models and providers in [models.dev](https://models.dev), plus deterministic local pricing for Cursor Auto/Composer and Cursor model aliases that are not on models.dev.
 
+Quota and `/tokens_*` output are computed from local OpenCode session history.
+
 ![Image of quota toasts](https://github.com/slkiser/opencode-quota/blob/main/toast.png)
 
 ![Image of /quota and /tokens_daily outputs](https://github.com/slkiser/opencode-quota/blob/main/quota.png)
@@ -46,7 +48,7 @@ That is enough for most installs. Providers are auto-detected from your existing
 
 ### Cursor
 
-If you use Cursor in OpenCode, install the Cursor companion plugin and quota config together:
+Cursor quota support requires the `opencode-cursor-oauth` companion auth plugin:
 
 ```jsonc
 {
@@ -71,10 +73,6 @@ Then authenticate once:
 ```sh
 opencode auth login --provider cursor
 ```
-
-Restart or reload OpenCode, then run `/quota_status`.
-
-If you only want usage tracking and do not care about Cursor budget percentage remaining, you can omit the `experimental.quotaToast` block or set `"cursorPlan": "none"`.
 
 ### Google Antigravity
 
@@ -229,6 +227,8 @@ No extra setup is required if OpenCode already has OpenAI or ChatGPT auth config
 
 Cursor support targets the OAuth-based [`opencode-cursor`](https://github.com/ephraimduncan/opencode-cursor) plugin. For the fastest setup, use the combined Cursor config from Quick Start, then run `opencode auth login --provider cursor` once.
 
+Restart or reload OpenCode, then run `/quota_status`.
+
 Current behavior:
 
 - Detects Cursor usage from local OpenCode history when the current provider is `cursor` or the stored/current model id is `cursor/*`
@@ -239,6 +239,7 @@ Current behavior:
 
 Notes:
 
+- If you only want usage tracking and do not care about Cursor budget percentage remaining, you can omit the `experimental.quotaToast` block or set `"cursorPlan": "none"`
 - Cursor OAuth and proxy traffic are used by OpenCode itself, but this plugin still computes quota and token output only from local `opencode.db`, local `auth.json`, and the bundled/runtime pricing snapshot
 - Session cookies and Cursor team APIs are not required for this local reporting path
 - Legacy `cursor-acp/*` history remains readable for older installs, but new installs should use the OAuth plugin workflow
