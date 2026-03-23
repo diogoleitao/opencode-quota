@@ -1400,6 +1400,216 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     return lines.join("\n");
   }
 
+  async function injectCommandOutputAndHandle(
+    sessionID: string,
+    output?: string | null,
+  ): Promise<never> {
+    if (output !== undefined && output !== null) {
+      await injectRawOutput(sessionID, output);
+    }
+    handled();
+  }
+
+  async function handleQuotaSlashCommand(input: CommandExecuteInput): Promise<never> {
+    const sessionID = input.sessionID;
+    const generatedAtMs = Date.now();
+    const now = generatedAtMs;
+    const quotaRequestContext: QuotaCommandRequestContext = {
+      sessionID,
+      sessionMeta: sessionID ? await getSessionModelMeta(sessionID) : undefined,
+    };
+    const bypassCommandCache = await shouldBypassQuotaCommandCache(
+      sessionID,
+      quotaRequestContext.sessionMeta,
+    );
+    const body = bypassCommandCache
+      ? await fetchQuotaCommandBody("command:/quota", quotaRequestContext)
+      : await (async () => {
+          const quotaCache = getQuotaCommandCache();
+          pruneQuotaCommandCache(config.minIntervalMs, now);
+
+          const cacheKey = buildQuotaCommandCacheKey(quotaRequestContext);
+          const cachedEntry = quotaCache.get(cacheKey);
+          if (cachedEntry?.timestamp && now - cachedEntry.timestamp < config.minIntervalMs) {
+            return cachedEntry.body;
+          }
+
+          const cacheEntry = cachedEntry ?? { body: "", timestamp: 0 };
+          if (!cachedEntry) {
+            quotaCache.set(cacheKey, cacheEntry);
+          }
+
+          return await (cacheEntry.inFlight ??
+            (cacheEntry.inFlight = (async () => {
+              try {
+                const freshBody = await fetchQuotaCommandBody(
+                  "command:/quota",
+                  quotaRequestContext,
+                );
+                if (freshBody) {
+                  cacheEntry.body = freshBody;
+                  cacheEntry.timestamp = Date.now();
+                }
+                return freshBody;
+              } finally {
+                cacheEntry.inFlight = undefined;
+                if (!cacheEntry.body && cacheEntry.timestamp <= 0) {
+                  quotaCache.delete(cacheKey);
+                }
+              }
+            })()));
+        })();
+
+    if (!body) {
+      if (!configLoaded) {
+        return await injectCommandOutputAndHandle(
+          sessionID,
+          "Quota unavailable (config not loaded, try again)",
+        );
+      }
+      if (!config.enabled) {
+        return await injectCommandOutputAndHandle(
+          sessionID,
+          "Quota disabled in config (enabled: false)",
+        );
+      }
+      return await injectCommandOutputAndHandle(
+        sessionID,
+        await buildQuotaCommandUnavailableMessage(quotaRequestContext),
+      );
+    }
+
+    const heading = renderCommandHeading({
+      title: "Quota (/quota)",
+      generatedAtMs,
+    });
+    return await injectCommandOutputAndHandle(sessionID, `${heading}\n\n${body}`);
+  }
+
+  async function handlePricingRefreshSlashCommand(input: CommandExecuteInput): Promise<never> {
+    const sessionID = input.sessionID;
+    const generatedAtMs = Date.now();
+    if ((input.arguments ?? "").trim()) {
+      return await injectCommandOutputAndHandle(
+        sessionID,
+        "Invalid arguments for /pricing_refresh\n\nThis command does not accept arguments.\n\nUsage:\n/pricing_refresh",
+      );
+    }
+
+    const result = await maybeRefreshPricingSnapshot({
+      reason: "manual",
+      force: true,
+      snapshotSelection: config.pricingSnapshot.source,
+      allowRefreshWhenSelectionBundled: true,
+    });
+    return await injectCommandOutputAndHandle(
+      sessionID,
+      buildPricingRefreshCommandOutput({
+        result,
+        generatedAtMs,
+      }),
+    );
+  }
+
+  async function handleTokenReportSlashCommand(
+    input: CommandExecuteInput,
+    command: TokenReportCommandId,
+  ): Promise<never> {
+    const sessionID = input.sessionID;
+    const untilMs = Date.now();
+    const generatedAtMs = Date.now();
+    await kickPricingRefresh({ reason: "tokens", maxWaitMs: 750 });
+    const spec = TOKEN_REPORT_COMMANDS_BY_ID.get(command)!;
+
+    if (spec.kind === "between") {
+      const parsed = parseQuotaBetweenArgs(input.arguments);
+      if (!parsed.ok) {
+        return await injectCommandOutputAndHandle(
+          sessionID,
+          `Invalid arguments for /${spec.id}\n\n${parsed.error}\n\nExpected: /${spec.id} YYYY-MM-DD YYYY-MM-DD\nExample: /${spec.id} 2026-01-01 2026-01-15`,
+        );
+      }
+
+      const sinceMs = startOfLocalDayMs(parsed.startYmd);
+      const rangeUntilMs = startOfNextLocalDayMs(parsed.endYmd);
+      return await injectCommandOutputAndHandle(
+        sessionID,
+        await buildQuotaReport({
+          title: spec.titleForRange(parsed.startYmd, parsed.endYmd),
+          sinceMs,
+          untilMs: rangeUntilMs,
+          sessionID,
+          generatedAtMs,
+        }),
+      );
+    }
+
+    let sinceMs: number | undefined;
+    let filterSessionID: string | undefined;
+    let sessionOnly: boolean | undefined;
+    let topModels: number | undefined;
+    let topSessions: number | undefined;
+
+    switch (spec.kind) {
+      case "rolling":
+        sinceMs = untilMs - spec.windowMs!;
+        break;
+      case "today": {
+        const now = new Date();
+        const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+        sinceMs = startOfDay.getTime();
+        break;
+      }
+      case "session":
+        filterSessionID = sessionID;
+        sessionOnly = true;
+        break;
+      case "all":
+        topModels = spec.topModels;
+        topSessions = spec.topSessions;
+        break;
+    }
+
+    return await injectCommandOutputAndHandle(
+      sessionID,
+      await buildQuotaReport({
+        title: spec.title,
+        sinceMs,
+        untilMs: spec.kind === "rolling" || spec.kind === "today" ? untilMs : undefined,
+        sessionID,
+        filterSessionID,
+        sessionOnly,
+        topModels,
+        topSessions,
+        generatedAtMs,
+      }),
+    );
+  }
+
+  async function handleQuotaStatusSlashCommand(input: CommandExecuteInput): Promise<never> {
+    const sessionID = input.sessionID;
+    const generatedAtMs = Date.now();
+    const parsed = parseOptionalJsonArgs(input.arguments);
+    if (!parsed.ok) {
+      return await injectCommandOutputAndHandle(
+        sessionID,
+        `Invalid arguments for /quota_status\n\n${parsed.error}\n\nExample:\n/quota_status {"refreshGoogleTokens": true}`,
+      );
+    }
+
+    const out = await buildStatusReport({
+      refreshGoogleTokens: parsed.value["refreshGoogleTokens"] === true,
+      skewMs:
+        typeof parsed.value["skewMs"] === "number"
+          ? (parsed.value["skewMs"] as number)
+          : undefined,
+      force: parsed.value["force"] === true,
+      sessionID,
+      generatedAtMs,
+    });
+    return await injectCommandOutputAndHandle(sessionID, out);
+  }
+
   // Return hook implementations
   return {
     // Register built-in slash commands (in addition to /tool quota_*)
@@ -1433,220 +1643,35 @@ export const QuotaToastPlugin: Plugin = async ({ client }) => {
     "command.execute.before": async (input: CommandExecuteInput) => {
       try {
         const cmd = input.command;
-        const sessionID = input.sessionID;
-        const isQuotaCommand =
+        const isHandledSlashCommand =
           cmd === "quota" ||
           cmd === "quota_status" ||
           cmd === "pricing_refresh" ||
           isTokenReportCommand(cmd);
 
-        if (isQuotaCommand && !configLoaded) {
+        if (isHandledSlashCommand && !configLoaded) {
           await refreshConfig();
         }
-        if (isQuotaCommand && !config.enabled) {
+        if (isHandledSlashCommand && !config.enabled) {
           handled();
         }
 
         if (cmd === "quota") {
-          const generatedAtMs = Date.now();
-          const now = generatedAtMs;
-          const quotaRequestContext: QuotaCommandRequestContext = {
-            sessionID,
-            sessionMeta: sessionID ? await getSessionModelMeta(sessionID) : undefined,
-          };
-          const bypassCommandCache = await shouldBypassQuotaCommandCache(
-            sessionID,
-            quotaRequestContext.sessionMeta,
-          );
-          const body = bypassCommandCache
-            ? await fetchQuotaCommandBody("command:/quota", quotaRequestContext)
-            : await (async () => {
-                const quotaCache = getQuotaCommandCache();
-                pruneQuotaCommandCache(config.minIntervalMs, now);
-
-                const cacheKey = buildQuotaCommandCacheKey(quotaRequestContext);
-                const cachedEntry = quotaCache.get(cacheKey);
-                if (
-                  cachedEntry?.timestamp &&
-                  now - cachedEntry.timestamp < config.minIntervalMs
-                ) {
-                  return cachedEntry.body;
-                }
-
-                const cacheEntry = cachedEntry ?? { body: "", timestamp: 0 };
-                if (!cachedEntry) {
-                  quotaCache.set(cacheKey, cacheEntry);
-                }
-
-                return await (cacheEntry.inFlight ??
-                  (cacheEntry.inFlight = (async () => {
-                    try {
-                      const freshBody = await fetchQuotaCommandBody(
-                        "command:/quota",
-                        quotaRequestContext,
-                      );
-                      if (freshBody) {
-                        cacheEntry.body = freshBody;
-                        cacheEntry.timestamp = Date.now();
-                      }
-                      return freshBody;
-                    } finally {
-                      cacheEntry.inFlight = undefined;
-                      if (!cacheEntry.body && cacheEntry.timestamp <= 0) {
-                        quotaCache.delete(cacheKey);
-                      }
-                    }
-                  })()));
-              })();
-
-          if (!body) {
-            // Provide an actionable message instead of a generic "unavailable".
-            if (!configLoaded) {
-              await injectRawOutput(sessionID, "Quota unavailable (config not loaded, try again)");
-            } else if (!config.enabled) {
-              await injectRawOutput(sessionID, "Quota disabled in config (enabled: false)");
-            } else {
-              await injectRawOutput(
-                sessionID,
-                await buildQuotaCommandUnavailableMessage(quotaRequestContext),
-              );
-            }
-            handled();
-          }
-
-          const heading = renderCommandHeading({
-            title: "Quota (/quota)",
-            generatedAtMs,
-          });
-          await injectRawOutput(sessionID, `${heading}\n\n${body}`);
-          handled();
+          return await handleQuotaSlashCommand(input);
         }
 
         if (cmd === "pricing_refresh") {
-          const generatedAtMs = Date.now();
-          if ((input.arguments ?? "").trim()) {
-            await injectRawOutput(
-              sessionID,
-              "Invalid arguments for /pricing_refresh\n\nThis command does not accept arguments.\n\nUsage:\n/pricing_refresh",
-            );
-            handled();
-          }
-
-          const result = await maybeRefreshPricingSnapshot({
-            reason: "manual",
-            force: true,
-            snapshotSelection: config.pricingSnapshot.source,
-            allowRefreshWhenSelectionBundled: true,
-          });
-          await injectRawOutput(
-            sessionID,
-            buildPricingRefreshCommandOutput({
-              result,
-              generatedAtMs,
-            }),
-          );
-          handled();
+          return await handlePricingRefreshSlashCommand(input);
         }
-
-        const untilMs = Date.now();
 
         // Handle token report commands (/tokens_*)
         if (isTokenReportCommand(cmd)) {
-          const generatedAtMs = Date.now();
-          await kickPricingRefresh({ reason: "tokens", maxWaitMs: 750 });
-          const spec = TOKEN_REPORT_COMMANDS_BY_ID.get(cmd)!;
-
-          if (spec.kind === "between") {
-            // Special handling for date range command
-            const parsed = parseQuotaBetweenArgs(input.arguments);
-            if (!parsed.ok) {
-              await injectRawOutput(
-                sessionID,
-                `Invalid arguments for /${spec.id}\n\n${parsed.error}\n\nExpected: /${spec.id} YYYY-MM-DD YYYY-MM-DD\nExample: /${spec.id} 2026-01-01 2026-01-15`,
-              );
-              handled();
-            }
-            const sinceMs = startOfLocalDayMs(parsed.startYmd);
-            const rangeUntilMs = startOfNextLocalDayMs(parsed.endYmd); // Exclusive upper bound for inclusive end date
-            const out = await buildQuotaReport({
-              title: spec.titleForRange(parsed.startYmd, parsed.endYmd),
-              sinceMs,
-              untilMs: rangeUntilMs,
-              sessionID,
-              generatedAtMs,
-            });
-            await injectRawOutput(sessionID, out);
-            handled();
-          }
-
-          // Non-between token report commands
-          let sinceMs: number | undefined;
-          let filterSessionID: string | undefined;
-          let sessionOnly: boolean | undefined;
-          let topModels: number | undefined;
-          let topSessions: number | undefined;
-
-          switch (spec.kind) {
-            case "rolling":
-              sinceMs = untilMs - spec.windowMs!;
-              break;
-            case "today": {
-              const now = new Date();
-              const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-              sinceMs = startOfDay.getTime();
-              break;
-            }
-            case "session":
-              filterSessionID = sessionID;
-              sessionOnly = true;
-              break;
-            case "all":
-              topModels = spec.topModels;
-              topSessions = spec.topSessions;
-              break;
-          }
-
-          const out = await buildQuotaReport({
-            title: spec.title,
-            sinceMs,
-            untilMs: spec.kind === "rolling" || spec.kind === "today" ? untilMs : undefined,
-            sessionID,
-            filterSessionID,
-            sessionOnly,
-            topModels,
-            topSessions,
-            generatedAtMs,
-          });
-          await injectRawOutput(sessionID, out);
-          handled();
+          return await handleTokenReportSlashCommand(input, cmd);
         }
 
         // Handle /quota_status (diagnostics - not a token report)
         if (cmd === "quota_status") {
-          const generatedAtMs = Date.now();
-          const parsed = parseOptionalJsonArgs(input.arguments);
-          if (!parsed.ok) {
-            await injectRawOutput(
-              sessionID,
-              `Invalid arguments for /quota_status\n\n${parsed.error}\n\nExample:\n/quota_status {"refreshGoogleTokens": true}`,
-            );
-            handled();
-          }
-
-          const out = await buildStatusReport({
-            refreshGoogleTokens: parsed.value["refreshGoogleTokens"] === true,
-            skewMs:
-              typeof parsed.value["skewMs"] === "number"
-                ? (parsed.value["skewMs"] as number)
-                : undefined,
-            force: parsed.value["force"] === true,
-            sessionID,
-            generatedAtMs,
-          });
-          if (out) {
-            await injectRawOutput(sessionID, out);
-          }
-          handled();
+          return await handleQuotaStatusSlashCommand(input);
         }
       } catch (err) {
         // IMPORTANT: do not swallow command-handled sentinel errors.
