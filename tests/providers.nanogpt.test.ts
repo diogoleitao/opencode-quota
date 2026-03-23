@@ -214,7 +214,7 @@ describe("nanogpt provider", () => {
     expect(nanoGptProvider.matchesCurrentModel?.("openai/gpt-5")).toBe(false);
   });
 
-  it("is available via provider ids or API key fallback", async () => {
+  it("is available when a trusted API key is configured", async () => {
     const { hasNanoGptApiKeyConfigured } = await import("../src/lib/nanogpt.js");
     (hasNanoGptApiKeyConfigured as any).mockResolvedValue(true);
 
@@ -238,6 +238,22 @@ describe("nanogpt provider", () => {
 
     await expect(nanoGptProvider.isAvailable(withProvider)).resolves.toBe(true);
     await expect(nanoGptProvider.isAvailable(fallback)).resolves.toBe(true);
+  });
+
+  it("is not available when the provider id exists but no trusted API key is configured", async () => {
+    const { hasNanoGptApiKeyConfigured } = await import("../src/lib/nanogpt.js");
+    (hasNanoGptApiKeyConfigured as any).mockResolvedValue(false);
+
+    const withProvider = {
+      client: {
+        config: {
+          providers: vi.fn().mockResolvedValue({ data: { providers: [{ id: "nanogpt" }] } }),
+          get: vi.fn(),
+        },
+      },
+    } as any;
+
+    await expect(nanoGptProvider.isAvailable(withProvider)).resolves.toBe(false);
   });
 
   it("is not available when provider ids are absent and no API key exists", async () => {

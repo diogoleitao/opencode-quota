@@ -9,7 +9,7 @@
  */
 
 import { resolveEnvTemplate } from "./env-template.js";
-import { readAuthFile } from "./opencode-auth.js";
+import { getAuthPaths, readAuthFile } from "./opencode-auth.js";
 import {
   getApiKeyDiagnostics,
   getGlobalOpencodeConfigCandidatePaths,
@@ -106,10 +106,17 @@ export async function getNanoGptKeyDiagnostics(): Promise<{
   configured: boolean;
   source: NanoGptKeySource | null;
   checkedPaths: string[];
+  authPaths: string[];
 }> {
-  return getApiKeyDiagnostics<NanoGptKeySource>({
+  const authPaths = getAuthPaths();
+  const diagnostics = await getApiKeyDiagnostics<NanoGptKeySource>({
     envVarNames: ["NANOGPT_API_KEY", "NANO_GPT_API_KEY"],
     resolve: resolveNanoGptApiKey,
     getConfigCandidates: getGlobalOpencodeConfigCandidatePaths,
   });
+
+  return {
+    ...diagnostics,
+    authPaths,
+  };
 }

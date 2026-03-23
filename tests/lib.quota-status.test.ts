@@ -50,6 +50,7 @@ const nanoGptMocks = vi.hoisted(() => ({
     configured: false,
     source: null,
     checkedPaths: [],
+    authPaths: ["/tmp/auth.json"],
   })),
   queryNanoGptQuota: vi.fn(async () => null),
 }));
@@ -275,6 +276,7 @@ describe("buildQuotaStatusReport", () => {
     expect(report).toContain("- api_key_configured: false");
     expect(report).toContain("- api_key_source: (none)");
     expect(report).toContain("- api_key_checked_paths: (none)");
+    expect(report).toContain("- api_key_auth_paths: /tmp/auth.json");
     expect(report).toContain("cursor:");
     expect(report).toContain("- plan: Pro");
     expect(report).toContain("- included_api_usd: $20.00");
@@ -308,6 +310,7 @@ describe("buildQuotaStatusReport", () => {
       configured: true,
       source: "env:NANOGPT_API_KEY",
       checkedPaths: ["env:NANOGPT_API_KEY"],
+      authPaths: ["/tmp/auth.json"],
     });
     nanoGptMocks.queryNanoGptQuota.mockResolvedValueOnce({
       success: true,
@@ -367,6 +370,7 @@ describe("buildQuotaStatusReport", () => {
     expect(report).toContain("nanogpt:");
     expect(report).toContain("- api_key_configured: true");
     expect(report).toContain("- api_key_source: env:NANOGPT_API_KEY");
+    expect(report).toContain("- api_key_auth_paths: /tmp/auth.json");
     expect(report).toContain("- subscription_active: false");
     expect(report).toContain("- subscription_state: grace");
     expect(report).toContain("- enforce_daily_limit: true");

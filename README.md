@@ -347,7 +347,7 @@ NanoGPT uses live NanoGPT subscription usage and balance endpoints, so `/quota`,
 - Optional API key: `provider.nanogpt.options.apiKey` or `provider["nano-gpt"].options.apiKey`.
 - For security, provider secrets are read from `NANOGPT_API_KEY`, `NANO_GPT_API_KEY`, your user/global OpenCode config, or `auth.json`. Repo-local `opencode.json` / `opencode.jsonc` is ignored for NanoGPT secrets.
 - Allowed env templates are limited to `{env:NANOGPT_API_KEY}` and `{env:NANO_GPT_API_KEY}`.
-- `/quota_status` prints a `nanogpt` section with live subscription state, daily/monthly usage windows, endpoint errors, and balance details.
+- `/quota_status` prints a `nanogpt` section with API-key diagnostics, auth candidate paths, live subscription state, daily/monthly usage windows, endpoint errors, and balance details.
 - NanoGPT quota reflects subscription-covered requests and account balance. It is not token-priced in `/tokens_*`.
 
 Example user/global config (`~/.config/opencode/opencode.jsonc` on Linux/macOS):

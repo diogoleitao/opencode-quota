@@ -27,6 +27,7 @@ vi.mock("fs/promises", () => ({
 
 vi.mock("../src/lib/opencode-auth.js", () => ({
   readAuthFile: vi.fn(),
+  getAuthPaths: () => [join(homedir(), ".local", "share", "opencode", "auth.json")],
 }));
 
 describe("nanogpt-config", () => {
@@ -214,6 +215,7 @@ describe("nanogpt-config", () => {
       expect(result.configured).toBe(true);
       expect(result.source).toBe("env:NANOGPT_API_KEY");
       expect(result.checkedPaths).toContain("env:NANOGPT_API_KEY");
+      expect(result.authPaths).toContain(join(homedir(), ".local", "share", "opencode", "auth.json"));
     });
 
     it("reports checked trusted config paths", async () => {
@@ -229,6 +231,7 @@ describe("nanogpt-config", () => {
 
       expect(result.configured).toBe(false);
       expect(result.checkedPaths).toContain(expectedPath);
+      expect(result.authPaths).toContain(join(homedir(), ".local", "share", "opencode", "auth.json"));
     });
   });
 

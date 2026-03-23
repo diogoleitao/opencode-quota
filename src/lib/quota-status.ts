@@ -468,10 +468,16 @@ export async function buildQuotaStatusReport(params: {
 
   lines.push("");
   lines.push("nanogpt:");
-  let nanoGptDiag: { configured: boolean; source: string | null; checkedPaths: string[] } = {
+  let nanoGptDiag: {
+    configured: boolean;
+    source: string | null;
+    checkedPaths: string[];
+    authPaths: string[];
+  } = {
     configured: false,
     source: null,
     checkedPaths: [],
+    authPaths: [],
   };
   try {
     nanoGptDiag = await getNanoGptKeyDiagnostics();
@@ -481,6 +487,7 @@ export async function buildQuotaStatusReport(params: {
   lines.push(`- api_key_configured: ${nanoGptDiag.configured ? "true" : "false"}`);
   lines.push(`- api_key_source: ${nanoGptDiag.source ?? "(none)"}`);
   lines.push(`- api_key_checked_paths: ${joinOrNone(nanoGptDiag.checkedPaths)}`);
+  lines.push(`- api_key_auth_paths: ${joinOrNone(nanoGptDiag.authPaths)}`);
   if (nanoGptDiag.configured) {
     try {
       const nanoGptQuota = await queryNanoGptQuota();

@@ -24,17 +24,18 @@ export const nanoGptProvider: QuotaProvider = {
   id: "nanogpt",
 
   async isAvailable(ctx: QuotaProviderContext): Promise<boolean> {
+    const hasApiKey = await hasNanoGptApiKeyConfigured();
     try {
       const resp = await ctx.client.config.providers();
       const ids = new Set((resp.data?.providers ?? []).map((provider) => provider.id));
       if (ids.has("nanogpt") || ids.has("nano-gpt")) {
-        return true;
+        return hasApiKey;
       }
     } catch {
       // Ignore provider lookup failures and fall back to key presence.
     }
 
-    return await hasNanoGptApiKeyConfigured();
+    return hasApiKey;
   },
 
   matchesCurrentModel(model: string): boolean {

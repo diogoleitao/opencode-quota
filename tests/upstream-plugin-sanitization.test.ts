@@ -106,6 +106,37 @@ function deriveConversationKey(messages) {
 }
 `;
 
+const PARTIALLY_SAFE_CURSOR_PROXY_SOURCE = `function normalizeConversationMessages(messages) {
+    return messages
+        .filter((m) => m.role !== "tool")
+        .map((m) => ({
+        role: m.role,
+        content: textContent(m.content),
+    }))
+        .filter((m) => m.content || m.role === "user" || m.role === "system");
+}
+/** Derive a key for active bridge lookup (tool-call continuations). Model-specific. */
+function deriveBridgeKey(modelId, messages) {
+    const normalizedMessages = normalizeConversationMessages(messages);
+    return createHash("sha256")
+        .update(JSON.stringify({
+        modelId,
+        messages: normalizedMessages,
+    }))
+        .digest("hex")
+        .slice(0, 16);
+}
+/** Derive a key for conversation state. Model-independent so context survives model switches. */
+function deriveConversationKey(messages) {
+    const firstUserMsg = messages.find((m) => m.role === "user");
+    const firstUserText = firstUserMsg ? textContent(firstUserMsg.content) : "";
+    return createHash("sha256")
+        .update(\`conv:\${firstUserText.slice(0, 200)}\`)
+        .digest("hex")
+        .slice(0, 16);
+}
+`;
+
 describe("upstream-plugin-sanitization", () => {
   const tempRoots: string[] = [];
 
@@ -202,6 +233,20 @@ describe("upstream-plugin-sanitization", () => {
     return modelId + ":" + messages.length;
 }
 `,
+    });
+
+    await expect(sanitizeUpstreamPluginSnapshot("opencode-cursor-oauth", tempRoot)).rejects.toThrow(
+      "Expected CURSOR_TRANSCRIPT_BRIDGE_KEY",
+    );
+  });
+
+  it("fails closed when only one Cursor proxy key derivation is sanitized", async () => {
+    const tempRoot = await mkdtemp(path.join(os.tmpdir(), "opencode-quota-sanitize-"));
+    tempRoots.push(tempRoot);
+
+    await writeCursorSnapshot(tempRoot, {
+      modelsSource: SAFE_CURSOR_MODELS_SOURCE,
+      proxySource: PARTIALLY_SAFE_CURSOR_PROXY_SOURCE,
     });
 
     await expect(sanitizeUpstreamPluginSnapshot("opencode-cursor-oauth", tempRoot)).rejects.toThrow(
