@@ -13,18 +13,26 @@ import type {
   QuotaProviderResult,
   QuotaToastEntry,
 } from "../lib/entries.js";
-import { queryAnthropicQuota } from "../lib/anthropic.js";
+import {
+  hasAnthropicCredentialsConfigured,
+  queryAnthropicQuota,
+} from "../lib/anthropic.js";
 import { isAnyProviderIdAvailable } from "../lib/provider-availability.js";
 
 export const anthropicProvider: QuotaProvider = {
   id: "anthropic",
 
   async isAvailable(ctx: QuotaProviderContext): Promise<boolean> {
-    return isAnyProviderIdAvailable({
+    const providerAvailable = await isAnyProviderIdAvailable({
       ctx,
       candidateIds: ["anthropic"],
       fallbackOnError: false,
     });
+    if (!providerAvailable) {
+      return false;
+    }
+
+    return await hasAnthropicCredentialsConfigured();
   },
 
   matchesCurrentModel(model: string): boolean {

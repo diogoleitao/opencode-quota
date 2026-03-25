@@ -78,17 +78,40 @@ That is enough for most installs. Providers are auto-detected from your existing
 
 | Provider | Auto setup | How it works |
 | --- | --- | --- |
-| **Anthropic (Claude)** | Usually | Claude Code credentials via `~/.claude/.credentials.json` or macOS Keychain. Requires Claude Code installed and authenticated (`claude login`). Surfaces 5-hour and 7-day rate-limit windows. |
+| **Anthropic (Claude)** | Needs [quick setup](#anthropic-quick-setup) | Claude Code credentials or env. |
 | **GitHub Copilot** | Usually | OpenCode auth; PAT only for managed billing. |
 | **OpenAI** | Yes | OpenCode auth. |
 | **Cursor** | Needs [quick setup](#cursor-quick-setup) | Companion auth plugin + `provider.cursor`. |
 | **Qwen Code** | Needs [quick setup](#qwen-code-quick-setup) | Companion auth plugin. |
 | **Alibaba Coding Plan** | Yes | OpenCode auth + local request estimation. |
-| **Firmware AI** | Usually | User/global OpenCode config or env; repo-local secrets ignored. |
-| **Chutes AI** | Usually | User/global OpenCode config or env; repo-local secrets ignored. |
-| **NanoGPT** | Usually | User/global OpenCode config, env, or auth.json; repo-local secrets ignored. |
+| **Firmware AI** | Usually | User/global OpenCode config or env. |
+| **Chutes AI** | Usually | User/global OpenCode config or env. |
+| **NanoGPT** | Usually | User/global OpenCode config, env, or auth.json. |
 | **Google Antigravity** | Needs [quick setup](#google-antigravity-quick-setup) | Companion auth plugin. |
 | **Z.ai** | Yes | OpenCode auth. |
+
+<a id="anthropic-quick-setup"></a>
+<details>
+<summary><strong>Quick setup: Anthropic (Claude)</strong></summary>
+
+Anthropic quota support uses Claude Code credentials and surfaces the 5-hour and 7-day rate-limit windows.
+
+Credential resolution order:
+
+1. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
+2. `CLAUDE_CODE_OAUTH_TOKEN` environment variable
+
+OpenCode `auth.json` is not used for Anthropic quota resolution.
+
+If Claude Code is already installed and authenticated, this usually works automatically. Otherwise:
+
+1. Run Claude Code once so it writes `~/.claude/.credentials.json`.
+2. If needed, set `CLAUDE_CODE_OAUTH_TOKEN` manually as a fallback.
+3. Confirm OpenCode is configured with the `anthropic` provider.
+
+For behavior details and troubleshooting, see [Anthropic notes](#anthropic-notes).
+
+</details>
 
 <a id="cursor-quick-setup"></a>
 <details>
@@ -179,27 +202,15 @@ There is no `/token` command. The reporting commands are the `/tokens_*` family.
 <details>
 <summary><strong>Anthropic (Claude)</strong></summary>
 
-Quota is fetched from `GET https://api.anthropic.com/api/oauth/usage` using Claude Code's OAuth credentials. The plugin exposes two rate-limit windows: 5-hour and 7-day.
-
-Credential resolution order:
-
-1. `~/.claude/.credentials.json` → `claudeAiOauth.accessToken`
-2. macOS Keychain service `"Claude Code-credentials"` (macOS only)
-3. `CLAUDE_CODE_OAUTH_TOKEN` environment variable
-
-When the token is near expiry (within 5 minutes), the plugin invokes the `claude` CLI to trigger a silent background refresh before the API call is made.
-
-**Prerequisites:** Claude Code must be installed and authenticated. Run `claude` at least once to create the credentials file.
+Quota is fetched from `GET https://api.anthropic.com/api/oauth/usage` using a Claude Code OAuth access token.
 
 **Troubleshooting:**
 
 | Problem | Solution |
 | --- | --- |
-| "No credentials found" | Run `claude login` to authenticate with Claude Code |
-| "Invalid or expired token" | Run `claude login` to re-authenticate |
+| "No credentials found" | Run Claude Code once so it writes `~/.claude/.credentials.json`, or set `CLAUDE_CODE_OAUTH_TOKEN` |
+| "Invalid or expired token" | Refresh `~/.claude/.credentials.json` by re-authenticating Claude Code, or update `CLAUDE_CODE_OAUTH_TOKEN` |
 | Plugin not detected | Confirm OpenCode is configured with the `anthropic` provider |
-
-The credential loading approach in this provider is based on work from [claude-lens](https://github.com/Astro-Han/claude-lens) (a statusline plugin for Claude Code) and [ClaudeBar](https://github.com/tddworks/claudebar) (a macOS menu-bar app for quota monitoring).
 
 </details>
 
@@ -468,7 +479,7 @@ MIT
 
 OpenCode Quota is not built by the OpenCode team and is not affiliated with OpenCode or any provider listed above.
 
-The credential loading and API approach for the Anthropic provider is based on prior art from [claude-lens](https://github.com/Astro-Han/claude-lens) by Astro-Han and [ClaudeBar](https://github.com/tddworks/claudebar) by tddworks.
+The Anthropic provider uses the documented OAuth usage endpoint with Claude Code credentials from `~/.claude/.credentials.json` or `CLAUDE_CODE_OAUTH_TOKEN`.
 
 ## Star History
 

@@ -8,6 +8,7 @@ import {
 import { anthropicProvider } from "../src/providers/anthropic.js";
 
 vi.mock("../src/lib/anthropic.js", () => ({
+  hasAnthropicCredentialsConfigured: vi.fn(),
   queryAnthropicQuota: vi.fn(),
 }));
 
@@ -104,7 +105,7 @@ describe("anthropic provider", () => {
     const { queryAnthropicQuota } = await import("../src/lib/anthropic.js");
     (queryAnthropicQuota as any).mockResolvedValueOnce({
       success: false,
-      error: "Invalid or expired token — run claude login to re-authenticate",
+      error: "Invalid or expired token; refresh ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN",
     });
 
     const out = await anthropicProvider.fetch({} as any);
@@ -119,7 +120,10 @@ describe("anthropic provider", () => {
     expect(anthropicProvider.matchesCurrentModel?.("copilot/claude-sonnet-4-5")).toBe(false);
   });
 
-  it("is available when provider ids include anthropic", async () => {
+  it("is available only when provider ids include anthropic and credentials are configured", async () => {
+    const { hasAnthropicCredentialsConfigured } = await import("../src/lib/anthropic.js");
+    (hasAnthropicCredentialsConfigured as any).mockResolvedValue(true);
+
     const makeCtx = (ids: string[]) =>
       ({
         client: {
@@ -133,7 +137,26 @@ describe("anthropic provider", () => {
 
     await expect(anthropicProvider.isAvailable(makeCtx(["anthropic"]))).resolves.toBe(true);
     await expect(anthropicProvider.isAvailable(makeCtx(["openai"]))).resolves.toBe(false);
-    await expect(anthropicProvider.isAvailable(makeCtx(["copilot", "anthropic"]))).resolves.toBe(true);
+    await expect(anthropicProvider.isAvailable(makeCtx(["copilot", "anthropic"]))).resolves.toBe(
+      true,
+    );
+  });
+
+  it("is not available when credentials are missing even if provider id exists", async () => {
+    const { hasAnthropicCredentialsConfigured } = await import("../src/lib/anthropic.js");
+    (hasAnthropicCredentialsConfigured as any).mockResolvedValue(false);
+
+    const ctx = {
+      client: {
+        config: {
+          providers: vi.fn().mockResolvedValue({ data: { providers: [{ id: "anthropic" }] } }),
+          get: vi.fn(),
+        },
+      },
+      config: { googleModels: [] },
+    } as any;
+
+    await expect(anthropicProvider.isAvailable(ctx)).resolves.toBe(false);
   });
 
   it("is not available when provider lookup throws", async () => {

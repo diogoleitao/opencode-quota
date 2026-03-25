@@ -1,37 +1,25 @@
 /**
  * Anthropic Claude quota fetcher.
  *
- * Reads Claude Code OAuth credentials and queries the Anthropic usage API
- * to surface 5-hour and 7-day rate-limit windows.
+ * Reads a Claude Code OAuth access token from local Claude credentials and
+ * queries the Anthropic usage API to surface 5-hour and 7-day rate-limit
+ * windows.
  *
- * Credential resolution order (mirrors ClaudeBar and claude-lens):
+ * Supported credential sources:
  *   1. ~/.claude/.credentials.json → claudeAiOauth.accessToken
- *   2. macOS Keychain: security find-generic-password -s "Claude Code-credentials" -w
- *   3. CLAUDE_CODE_OAUTH_TOKEN environment variable
- *
- * When a token is near expiry the claude CLI is invoked to trigger a silent
- * refresh before the API call is made.
- *
- * References:
- *   - https://github.com/Astro-Han/claude-lens (statusline plugin for Claude Code)
- *   - https://github.com/tddworks/claudebar (macOS menu-bar app)
+ *   2. CLAUDE_CODE_OAUTH_TOKEN environment variable
  */
 
-import { execSync } from "child_process";
-import { existsSync, readFileSync, writeFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
+import { sanitizeDisplaySnippet, sanitizeDisplayText } from "./display-sanitize.js";
 import { fetchWithTimeout } from "./http.js";
 
 const ANTHROPIC_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const ANTHROPIC_BETA_HEADER = "oauth-2025-04-20";
 const CREDENTIALS_PATH = join(homedir(), ".claude", ".credentials.json");
-const KEYCHAIN_SERVICE = "Claude Code-credentials";
-/** Refresh token when it expires within this many milliseconds. */
-const REFRESH_THRESHOLD_MS = 5 * 60 * 1000;
-/** Milliseconds to wait after invoking the claude CLI for a refresh. */
-const REFRESH_WAIT_MS = 2000;
 
 // =============================================================================
 // Types
@@ -51,8 +39,8 @@ export interface AnthropicUsageResponse {
 
 export interface AnthropicQuotaResult {
   success: true;
-  five_hour: { percentRemaining: number; resetTimeIso: string };
-  seven_day: { percentRemaining: number; resetTimeIso: string };
+  five_hour: { percentRemaining: number; resetTimeIso?: string };
+  seven_day: { percentRemaining: number; resetTimeIso?: string };
 }
 
 export interface AnthropicQuotaError {
@@ -65,19 +53,29 @@ export type AnthropicResult = AnthropicQuotaResult | AnthropicQuotaError | null;
 interface ClaudeCredentials {
   claudeAiOauth?: {
     accessToken?: string;
-    refreshToken?: string;
     expiresAt?: number;
   };
+}
+
+export interface ResolvedAnthropicCredentials {
+  accessToken: string;
+  expiresAt?: number;
+  source: "file" | "env";
 }
 
 // =============================================================================
 // Credential loading
 // =============================================================================
 
+function normalizeOptionalTimestamp(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function readCredentialsFile(): ClaudeCredentials | null {
   if (!existsSync(CREDENTIALS_PATH)) {
     return null;
   }
+
   try {
     const content = readFileSync(CREDENTIALS_PATH, "utf-8");
     return JSON.parse(content) as ClaudeCredentials;
@@ -86,56 +84,18 @@ function readCredentialsFile(): ClaudeCredentials | null {
   }
 }
 
-function readKeychainToken(): string | null {
-  if (process.platform !== "darwin") {
-    return null;
-  }
-  try {
-    const token = execSync(
-      `security find-generic-password -s "${KEYCHAIN_SERVICE}" -w 2>/dev/null`,
-      { encoding: "utf-8", timeout: 5000 },
-    ).trim();
-    if (!token) return null;
-
-    // The keychain value may be JSON (full credentials object) or a bare token.
-    try {
-      const parsed = JSON.parse(token) as ClaudeCredentials;
-      const access = parsed.claudeAiOauth?.accessToken?.trim();
-      return access || null;
-    } catch {
-      // Bare token string.
-      return token;
-    }
-  } catch {
-    return null;
-  }
-}
-
-interface ResolvedCredentials {
-  accessToken: string;
-  expiresAt?: number;
-  source: "file" | "keychain" | "env";
-}
-
-export function resolveAnthropicCredentials(): ResolvedCredentials | null {
-  // 1. Credentials file
-  const creds = readCredentialsFile();
-  const fileToken = creds?.claudeAiOauth?.accessToken?.trim();
+export function resolveAnthropicCredentialsFromFile(
+  credentials: ClaudeCredentials | null | undefined,
+): ResolvedAnthropicCredentials | null {
+  const fileToken = credentials?.claudeAiOauth?.accessToken?.trim();
   if (fileToken) {
     return {
       accessToken: fileToken,
-      expiresAt: creds?.claudeAiOauth?.expiresAt,
+      expiresAt: normalizeOptionalTimestamp(credentials?.claudeAiOauth?.expiresAt),
       source: "file",
     };
   }
 
-  // 2. macOS Keychain
-  const keychainToken = readKeychainToken();
-  if (keychainToken) {
-    return { accessToken: keychainToken, source: "keychain" };
-  }
-
-  // 3. Environment variable
   const envToken = process.env["CLAUDE_CODE_OAUTH_TOKEN"]?.trim();
   if (envToken) {
     return { accessToken: envToken, source: "env" };
@@ -144,36 +104,35 @@ export function resolveAnthropicCredentials(): ResolvedCredentials | null {
   return null;
 }
 
-// =============================================================================
-// Token refresh
-// =============================================================================
-
-function isNearExpiry(expiresAt: number | undefined): boolean {
-  if (expiresAt === undefined) return false;
-  return expiresAt - Date.now() < REFRESH_THRESHOLD_MS;
+export async function resolveAnthropicCredentials(): Promise<ResolvedAnthropicCredentials | null> {
+  return resolveAnthropicCredentialsFromFile(readCredentialsFile());
 }
 
-function refreshTokenViaCli(): void {
-  try {
-    execSync("claude --version 2>/dev/null", { timeout: 1000 });
-  } catch {
-    // claude binary not found or timed out — skip refresh.
-    return;
-  }
-  try {
-    // Invoking `claude` with a benign flag triggers a silent background
-    // refresh of the OAuth token without opening an interactive session.
-    execSync("claude --version 2>/dev/null", { timeout: 10000 });
-    // Wait for the credentials file to be updated.
-    execSync(`sleep ${REFRESH_WAIT_MS / 1000}`, { timeout: REFRESH_WAIT_MS + 1000 });
-  } catch {
-    // Refresh attempt failed; continue with the existing token.
-  }
+export async function hasAnthropicCredentialsConfigured(): Promise<boolean> {
+  return (await resolveAnthropicCredentials()) !== null;
 }
 
 // =============================================================================
 // Quota fetch
 // =============================================================================
+
+function normalizeResetTimeIso(value: unknown): string | undefined {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = Date.parse(trimmed);
+  if (!Number.isFinite(parsed)) {
+    return undefined;
+  }
+
+  return new Date(parsed).toISOString();
+}
 
 function parseUsageResponse(data: unknown): AnthropicQuotaResult | null {
   if (!data || typeof data !== "object") return null;
@@ -185,9 +144,7 @@ function parseUsageResponse(data: unknown): AnthropicQuotaResult | null {
   if (!fiveHour || !sevenDay) return null;
 
   const fiveUsed = Number(fiveHour["used_percentage"] ?? fiveHour["usedPercentage"]);
-  const fiveResets = String(fiveHour["resets_at"] ?? fiveHour["resetsAt"] ?? "");
   const sevenUsed = Number(sevenDay["used_percentage"] ?? sevenDay["usedPercentage"]);
-  const sevenResets = String(sevenDay["resets_at"] ?? sevenDay["resetsAt"] ?? "");
 
   if (!Number.isFinite(fiveUsed) || !Number.isFinite(sevenUsed)) return null;
 
@@ -195,11 +152,11 @@ function parseUsageResponse(data: unknown): AnthropicQuotaResult | null {
     success: true,
     five_hour: {
       percentRemaining: Math.max(0, Math.min(100, Math.round(100 - fiveUsed))),
-      resetTimeIso: fiveResets,
+      resetTimeIso: normalizeResetTimeIso(fiveHour["resets_at"] ?? fiveHour["resetsAt"]),
     },
     seven_day: {
       percentRemaining: Math.max(0, Math.min(100, Math.round(100 - sevenUsed))),
-      resetTimeIso: sevenResets,
+      resetTimeIso: normalizeResetTimeIso(sevenDay["resets_at"] ?? sevenDay["resetsAt"]),
     },
   };
 }
@@ -211,23 +168,17 @@ function parseUsageResponse(data: unknown): AnthropicQuotaResult | null {
  * Returns an error result when credentials exist but the fetch fails.
  */
 export async function queryAnthropicQuota(): Promise<AnthropicResult> {
-  let resolved = resolveAnthropicCredentials();
+  const resolved = await resolveAnthropicCredentials();
 
   if (!resolved) {
     return null;
   }
 
-  // Refresh if the token is near expiry (file source only — we have expiresAt).
-  if (resolved.source === "file" && isNearExpiry(resolved.expiresAt)) {
-    refreshTokenViaCli();
-    // Re-read after refresh attempt.
-    resolved = resolveAnthropicCredentials();
-    if (!resolved) {
-      return {
-        success: false,
-        error: "Token expired — run claude login to re-authenticate",
-      };
-    }
+  if (resolved.expiresAt !== undefined && resolved.expiresAt <= Date.now()) {
+    return {
+      success: false,
+      error: "Anthropic token expired; refresh ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN",
+    };
   }
 
   let response: Response;
@@ -241,21 +192,32 @@ export async function queryAnthropicQuota(): Promise<AnthropicResult> {
   } catch (err) {
     return {
       success: false,
-      error: `Quota fetch failed: ${err instanceof Error ? err.message : String(err)}`,
+      error: `Quota fetch failed: ${sanitizeDisplayText(
+        err instanceof Error ? err.message : String(err),
+      )}`,
     };
   }
 
   if (response.status === 401 || response.status === 403) {
     return {
       success: false,
-      error: "Invalid or expired token — run claude login to re-authenticate",
+      error: "Invalid or expired token; refresh ~/.claude/.credentials.json or CLAUDE_CODE_OAUTH_TOKEN",
     };
   }
 
   if (!response.ok) {
+    let text = "";
+    try {
+      text = await response.text();
+    } catch {
+      text = "";
+    }
+    const detail = sanitizeDisplaySnippet(text, 120);
     return {
       success: false,
-      error: `Anthropic API returned ${response.status}`,
+      error: detail
+        ? `Anthropic API error ${response.status}: ${detail}`
+        : `Anthropic API returned ${response.status}`,
     };
   }
 
@@ -280,5 +242,4 @@ export async function queryAnthropicQuota(): Promise<AnthropicResult> {
   return result;
 }
 
-// Exported for testing only.
-export { isNearExpiry, parseUsageResponse, readCredentialsFile, CREDENTIALS_PATH };
+export { CREDENTIALS_PATH, parseUsageResponse, readCredentialsFile };
